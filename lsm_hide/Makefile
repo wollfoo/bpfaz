@@ -11,6 +11,7 @@ BPF_CFLAGS += -DKBUILD_MODNAME='"lsm_hide_bpf"'
 BPF_CFLAGS += -I/usr/include/bpf
 BPF_CFLAGS += -I.
 
+
 # User-space compilation flags
 CFLAGS := -g -Wall -I$(OUTPUT)
 LIBS := -lbpf -lelf -lz
@@ -18,6 +19,8 @@ LIBS := -lbpf -lelf -lz
 # Create output directory
 $(OUTPUT):
 	mkdir -p $(OUTPUT)
+
+
 
 # Compile main BPF program
 $(OUTPUT)/lsm_hide_bpf.o: lsm_hide_bpf.c vmlinux.h | $(OUTPUT)
