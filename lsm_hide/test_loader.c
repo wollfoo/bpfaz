@@ -15,7 +15,7 @@
 
 #include "test_optimized.skel.h"
 
-static struct test_optimized_bpf *skel;
+static struct test_optimized *skel;
 static volatile bool exiting = false;
 
 static void sig_handler(int sig) {
@@ -65,21 +65,21 @@ int main(int argc, char **argv) {
     }
 
     /* Open BPF application */
-    skel = test_optimized_bpf__open();
+    skel = test_optimized__open();
     if (!skel) {
         fprintf(stderr, "Failed to open BPF skeleton\n");
         return 1;
     }
 
     /* Load & verify BPF programs */
-    err = test_optimized_bpf__load(skel);
+    err = test_optimized__load(skel);
     if (err) {
         fprintf(stderr, "Failed to load and verify BPF skeleton: %d\n", err);
         goto cleanup;
     }
 
     /* Attach tracepoints */
-    err = test_optimized_bpf__attach(skel);
+    err = test_optimized__attach(skel);
     if (err) {
         fprintf(stderr, "Failed to attach BPF skeleton: %d\n", err);
         goto cleanup;
@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
         uint32_t test_pid = atoi(argv[1]);
         uint32_t value = 1;
         
-        err = bpf_map_update_elem(bpf_map__fd(skel->maps.hidden_pid_map), 
+        err = bpf_map_update_elem(bpf_map__fd(skel->maps.hidden_pid_map),
                                  &test_pid, &value, BPF_ANY);
         if (err) {
             fprintf(stderr, "Failed to add PID %u to hidden map: %d\n", test_pid, err);
@@ -130,6 +130,6 @@ int main(int argc, char **argv) {
 
 cleanup:
     ring_buffer__free(rb);
-    test_optimized_bpf__destroy(skel);
+    test_optimized__destroy(skel);
     return -err;
 }
