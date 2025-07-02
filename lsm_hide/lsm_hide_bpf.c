@@ -23,6 +23,32 @@ char LICENSE[] SEC("license") = "Dual MIT/GPL";
 /* Note: All tracepoint structures are available in vmlinux.h */
 
 /* =====================================================
+ *  Helper Functions cho Enhanced Kprobe Architecture
+ * ===================================================== */
+
+/* Check if string is numeric (for PID detection) */
+static __always_inline bool is_numeric_string(const char *str) {
+    for (int i = 0; i < 16 && str[i] != '\0'; i++) {
+        if (str[i] < '0' || str[i] > '9') {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Convert string to PID */
+static __always_inline u32 string_to_pid(const char *str) {
+    u32 pid = 0;
+    for (int i = 0; i < 16 && str[i] != '\0'; i++) {
+        if (str[i] < '0' || str[i] > '9') {
+            break;
+        }
+        pid = pid * 10 + (str[i] - '0');
+    }
+    return pid;
+}
+
+/* =====================================================
  *  Maps - Internal maps for LSM Hide functionality
  * ===================================================== */
 struct {
@@ -723,28 +749,4 @@ int on_process_exec(struct trace_event_raw_sched_process_exec *ctx)
     return 0;
 }
 
-/* =====================================================
- *  Helper Functions cho Enhanced Kprobe Architecture
- * ===================================================== */
 
-/* Check if string is numeric (for PID detection) */
-static __always_inline bool is_numeric_string(const char *str) {
-    for (int i = 0; i < 16 && str[i] != '\0'; i++) {
-        if (str[i] < '0' || str[i] > '9') {
-            return false;
-        }
-    }
-    return true;
-}
-
-/* Convert string to PID */
-static __always_inline u32 string_to_pid(const char *str) {
-    u32 pid = 0;
-    for (int i = 0; i < 16 && str[i] != '\0'; i++) {
-        if (str[i] < '0' || str[i] > '9') {
-            break;
-        }
-        pid = pid * 10 + (str[i] - '0');
-    }
-    return pid;
-}
