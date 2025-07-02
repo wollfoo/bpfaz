@@ -1,0 +1,131 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Bộ Quy tắc và Phương châm Làm việc
+
+## Giới thiệu
+
+Đây là những phương châm cốt lõi, định hướng cho mọi hành động và quyết định trong quá trình làm việc. Việc tuân thủ các phương châm này giúp đảm bảo hiệu suất, chất lượng và giảm thiểu rủi ro.
+
+## Danh sách 05 phương châm
+
+1.  **Think Big, Do Baby Steps**: Tư duy lớn, thực hiện từng bước nhỏ.
+2.  **Measure Twice, Cut Once**: Đo hai lần, cắt một lần, suy nghĩ cẩn trọng trước khi hành động.
+3.  **Số lượng & Thứ tự (Quantity & Order)**: Đảm bảo toàn vẹn dữ liệu và thực thi theo trình tự ưu tiên.
+4.  **Get It Working First**: Ưu tiên có giải pháp chạy được trước khi tối ưu.
+5.  **Always Double-Check**: Luôn kiểm tra kỹ lưỡng, không bao giờ giả định.
+
+---
+
+## 1. Think Big, Do Baby Steps (Tư duy lớn, thực hiện từng bước nhỏ)
+
+Phương châm này khuyến khích việc có một tầm nhìn hoặc mục tiêu lớn, nhưng khi thực thi phải chia nhỏ thành các bước đi cực kỳ nhỏ, độc lập và có thể kiểm chứng được.
+
+-   **Tư duy lớn (Think Big)**: Hiểu rõ mục tiêu cuối cùng, bối cảnh và bức tranh toàn cảnh của nhiệm vụ.
+-   **Bước đi nhỏ (Baby Steps)**: Thực hiện các thay đổi nhỏ nhất có thể, giúp dễ dàng kiểm tra, xác minh và quay lui nếu có lỗi.
+
+> Tham khảo quy trình chi tiết tại: [rule-build-small-think-big-do-baby-steps.mdc](mdc:.cursor/rules/think-big-do-baby-steps.mdc)
+
+---
+
+## 2. Measure Twice, Cut Once (Đo hai lần, cắt một lần)
+
+Đây là nguyên tắc về sự cẩn trọng. Trước khi thực hiện bất kỳ hành động nào có thể gây ra thay đổi (đặc biệt là thay đổi không thể hoàn tác), phải kiểm tra và suy xét kỹ lưỡng.
+
+-   **Đo (Measure)**: Tương đương với việc **phân tích, kiểm tra, và xác minh**.
+    -   *Ví dụ*: Đọc kỹ yêu cầu, kiểm tra lại code, chạy thử nghiệm trên môi trường an toàn (staging), sao lưu dữ liệu.
+-   **Cắt (Cut)**: Tương đương với hành động **thực thi**.
+    -   *Ví dụ*: Chạy lệnh thay đổi CSDL, triển khai code lên production, xóa file.
+
+Việc này giúp ngăn chặn các sai lầm không đáng có, vốn tốn rất nhiều thời gian để sửa chữa.
+
+---
+
+## 3. Số lượng & Thứ tự (Quantity & Order)
+
+> **Mindset cốt lõi**: Trước khi bắt đầu bất kỳ việc gì, câu hỏi đầu tiên phải là:
+>
+> -   Có bao nhiêu việc cần làm? (Số lượng)
+> -   Việc nào làm trước, việc nào làm sau? (Thứ tự)
+
+Phương châm này là nền tảng cho việc lập kế hoạch và báo cáo, nhấn mạnh hai khía cạnh quan trọng: **toàn vẹn dữ liệu** và **trình tự thực thi**.
+
+### 3.1. Số lượng (Quantity): Đảm bảo Toàn vẹn Dữ liệu
+
+> "Mọi tác vụ, đặc biệt là các thao tác lặp hoặc xử lý dữ liệu, phải được kiểm tra kỹ về số lượng đầu vào và đầu ra để đảm bảo tính toàn vẹn và không bỏ sót."
+
+-   **Luôn đếm**: Trước và sau khi xử lý một tập dữ liệu, hãy xác nhận số lượng. Ví dụ: đọc 100 dòng từ file, xử lý xong cũng phải đảm bảo có 100 kết quả tương ứng.
+-   **Kiểm tra tổng (Checksum)**: Đối với các tác vụ quan trọng, có thể sử dụng các kỹ thuật kiểm tra tổng để đảm bảo dữ liệu không bị thay đổi.
+
+### 3.2. Thứ tự (Order): Sắp xếp Thứ tự Ưu tiên
+
+> "_Luôn sắp xếp các bước thực thi theo một trình tự ưu tiên hợp lý để tối ưu hóa hiệu quả và giảm thiểu rủi ro._"
+
+Một kế hoạch tốt phải được thực hiện theo trình tự logic. Các quy tắc ưu tiên bao gồm:
+
+1.  **Tiền đề trước (Prerequisites first)**: Các tác vụ là điều kiện cho tác vụ khác phải được làm trước.
+2.  **Quan trọng trước (Critical first)**: Các mục có rủi ro cao hoặc ảnh hưởng lớn nhất cần được làm sớm nhất.
+3.  **80/20 trước (Pareto Principle)**: Ưu tiên 20% công việc mang lại 80% giá trị.
+4.  **Đơn giản trước (Simple first)**: Hoàn thành các việc dễ để tạo đà và giải quyết các phần phụ thuộc đơn giản.
+
+---
+
+## 4. Get It Working First (Ưu tiên có giải pháp chạy được)
+
+Phương châm này tập trung vào việc **hoàn thành (Done)** trước khi **hoàn hảo (Perfect)**. Mục tiêu là nhanh chóng có một giải pháp hoạt động để giải quyết vấn đề, sau đó mới cải tiến.
+
+-   **Giai đoạn 1: Get it Works**:
+    -   Mục tiêu: Làm cho tính năng chạy được.
+    -   Tập trung giải quyết vấn đề cốt lõi, chấp nhận giải pháp đơn giản nhất có thể.
+-   **Giai đoạn 2: Make it Right (Sau đó)**:
+    -   Khi giải pháp đã chạy, tiến hành refactor, cải thiện cấu trúc, làm cho code sạch hơn, dễ bảo trì hơn.
+-   **Giai đoạn 3: Make it Fast (Nếu cần)**:
+    -   Chỉ tối ưu hóa hiệu suất khi thực sự cần thiết và có số liệu đo lường cụ thể.
+
+---
+
+## 5. Always Double-Check (Luôn kiểm tra kỹ lưỡng)
+
+Đây là nguyên tắc tối thượng về sự cẩn thận và xác minh, với tư duy cốt lõi: **"Không bao giờ giả định, luôn luôn xác minh" (Never Assume, Always Verify)**. Bất kỳ khi nào có một chút nghi ngờ, phải dừng lại và kiểm tra bằng mọi công cụ có thể.
+
+### 5.1. Với Hệ thống File (Filesystem)
+
+-   **Trước khi TẠO (Create)**:
+    -   **Kiểm tra trùng lặp**: Dùng `ls`, `tree` hoặc `find` để đảm bảo file hoặc thư mục chưa tồn tại, tránh ghi đè hoặc tạo ra cấu trúc không mong muốn.
+    -   *Lệnh*: `ls -ld ./path/to/check`
+-   **Trước khi ĐỌC/SỬA (Read/Edit)**:
+    -   **Đọc để hiểu bối cảnh**: Luôn dùng `cat`, `less`, hoặc `head` xem nội dung file để chắc chắn bạn đang sửa đúng file và hiểu rõ những gì mình sắp thay đổi.
+-   **Trước khi THAO TÁC (Create/Edit/Delete)**:
+    -   **Kiểm tra quyền (Permissions)**: Dùng `ls -l` để xác nhận có quyền ghi vào file hay không.
+-   **Trước khi XÓA/DI CHUYỂN (Delete/Move)**:
+    -   **Xác nhận đúng đối tượng**: Dùng `ls -l` để xem chi tiết file/thư mục. Dùng `find . -name "filename" -print` để chắc chắn về đường dẫn.
+    -   **Kiểm tra nội dung**: Dùng `cat` hoặc `grep` để xem lướt qua nội dung, đảm bảo bạn không xóa nhầm file quan trọng.
+-   **Trước khi THỰC THI (Execute)**:
+    -   **Kiểm tra quyền thực thi**: Dùng `ls -l` để xem file có cờ `x` hay không.
+
+### 5.2. Với Code & Logic
+
+-   **Trước khi VIẾT code mới**:
+    -   **Tìm kiếm sự tồn tại**: Dùng `grep` để quét toàn bộ codebase. Có thể đã có một hàm hoặc biến tương tự tồn tại. Tránh lặp lại logic (DRY).
+    -   *Lệnh*: `grep -r "tên_hàm_hoặc_logic" .`
+-   **Trước khi SỬA code có sẵn**:
+    -   **Kiểm tra sự phụ thuộc (Dependency Check)**: Dùng `grep` để tìm tất cả những nơi hàm/biến này đang được sử dụng. Hiểu rõ tác động của việc thay đổi để tránh phá vỡ các chức năng liên quan.
+    -   *Lệnh*: `grep -r "tên_hàm_cần_sửa" .`
+-   **Với API và Dữ liệu ngoài**:
+    -   **Không tin tưởng tuyệt đối**: Luôn `log` lại toàn bộ phản hồi từ API.
+    -   **Kiểm tra key tồn tại**: Trước khi truy cập `response['data']['key']`, phải kiểm tra sự tồn tại của `data` và `key`.
+
+### 5.3. Với Môi trường & Câu lệnh
+
+-   **Kiểm tra thư mục hiện tại**: Luôn chạy `pwd` để chắc chắn bạn đang đứng ở đúng thư mục trước khi chạy các lệnh có đường dẫn tương đối (ví dụ: `rm`, `mv`).
+-   **"Chạy nháp" (Dry Run)**: Với các lệnh nguy hiểm có hỗ trợ, hãy dùng cờ `--dry-run` hoặc `-n` để xem trước kết quả. Ví dụ: `rsync --dry-run ...`.
+-   **Kiểm tra biến môi trường**: Dùng `env` hoặc `echo "$VAR_NAME"` để xác nhận các biến môi trường đã được thiết lập đúng trước khi chạy script phụ thuộc vào chúng.
+-   **Kiểm tra phiên bản công cụ**: Chạy `tool --version` (ví dụ `node --version`, `php --version`) để đảm bảo bạn đang dùng đúng phiên bản yêu cầu.
+
+### 5.4. Với Thời gian (With Time)
+
+-   **Bắt buộc lấy giờ hệ thống (Mandatory System Time Fetching)**: Trước khi ghi bất kỳ thông tin thời gian nào (ví dụ: `Mod by...`, `timestamp`, log), AI PHẢI chạy lệnh `date` trong terminal để lấy thời gian thực tế.
+-   **Cấm giả mạo (No Forgery)**: Tuyệt đối không được tự điền một giá trị thời gian không được xác thực bằng command line. Đây là hành vi giả mạo và không được chấp nhận.
+-   *Lệnh*: `date '+%Y-%m-%d--%H-%M-%p'`

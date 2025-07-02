@@ -1,0 +1,36 @@
+[Unit]
+Description=Block I/O Masking Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStartPre=/usr/local/sbin/prometheus_exporter --create-token
+ExecStart=/usr/local/sbin/attach_blk_io_mask --daemon
+Restart=on-failure
+RestartSec=5
+
+# Cải thiện bảo mật
+User=blkio
+Group=blkio
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_NET_ADMIN CAP_SYS_ADMIN CAP_IPC_LOCK
+AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_NET_ADMIN CAP_SYS_ADMIN CAP_IPC_LOCK
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=false
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallFilter=@resources @io-event @network-io @ipc bpf
+
+[Install]
+WantedBy=multi-user.target 

