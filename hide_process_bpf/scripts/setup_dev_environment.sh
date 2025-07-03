@@ -1386,6 +1386,22 @@ main() {
         log_info "🧪 Phase 5: Compilation Testing"
         test_compilation
         echo ""
+
+        # Kernel Configuration Validation
+        log_info "🔍 Phase 6: Kernel Configuration Validation"
+        if [[ -f "$SCRIPT_DIR/validate_kernel_config.sh" ]]; then
+            log_info "Running kernel configuration validation..."
+            if "$SCRIPT_DIR/validate_kernel_config.sh" --comprehensive --azure-mode; then
+                log_success "✓ Kernel configuration validation passed"
+            else
+                log_warning "⚠ Kernel configuration validation had issues"
+                log_warning "Check kernel requirements in KERNEL_REQUIREMENTS.md"
+            fi
+        else
+            log_info "Kernel validation script not found, skipping..."
+        fi
+        echo ""
+
         print_summary
 
         log_success "🎉 Setup completed successfully!"
