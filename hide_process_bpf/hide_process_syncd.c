@@ -247,6 +247,15 @@ static void accept_new_client(void) {
         client_fds[client_count] = client_fd;
         client_count++;
         printf("New client connected (total: %d)\n", client_count);
+
+        /* Gửi ngay danh sách PID ẩn hiện tại cho client vừa kết nối */
+        struct pid_list_msg init_msg;
+        if (read_hidden_pids(&init_msg) >= 0) {
+            ssize_t msg_size = sizeof(uint32_t) * 2 + sizeof(uint32_t) * init_msg.count;
+            if (send(client_fd, &init_msg, msg_size, MSG_NOSIGNAL) < 0) {
+                perror("send init message to client");
+            }
+        }
     } else {
         fprintf(stderr, "Too many clients, rejecting connection\n");
         close(client_fd);
