@@ -48,6 +48,9 @@ struct event_data {
     uint64_t timestamp;
 };
 
+/* Forward declaration for ringbuf callback */
+static int handle_event(void *ctx, void *data, size_t size);
+
 /* =====================================================
  *  Signal Handlers
  * ===================================================== */
