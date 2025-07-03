@@ -592,6 +592,129 @@ install_dev_packages() {
     log_success "Development packages installed successfully"
 }
 
+# Setup kernel headers symlinks for eBPF compilation
+setup_kernel_headers_symlinks() {
+    log_info "Setting up kernel headers symlinks for eBPF compilation..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Would create symlinks for kernel headers"
+        return 0
+    fi
+
+    # Detect architecture
+    local arch=$(uname -m)
+    local arch_dir=""
+
+    case "$arch" in
+        x86_64)
+            arch_dir="x86_64-linux-gnu"
+            ;;
+        aarch64)
+            arch_dir="aarch64-linux-gnu"
+            ;;
+        armv7l)
+            arch_dir="arm-linux-gnueabihf"
+            ;;
+        *)
+            log_warning "⚠ Unknown architecture: $arch, using x86_64-linux-gnu as fallback"
+            arch_dir="x86_64-linux-gnu"
+            ;;
+    esac
+
+    log_info "Detected architecture: $arch, using directory: $arch_dir"
+
+    # Check and create asm symlink
+    if [[ ! -L /usr/include/asm ]]; then
+        if [[ -d "/usr/include/$arch_dir/asm" ]]; then
+            log_info "Creating asm symlink: /usr/include/asm -> /usr/include/$arch_dir/asm"
+            if ln -sf "/usr/include/$arch_dir/asm" /usr/include/asm; then
+                log_success "✓ asm symlink created successfully"
+            else
+                error_exit "Failed to create asm symlink"
+            fi
+        else
+            log_error "✗ Architecture-specific asm directory not found: /usr/include/$arch_dir/asm"
+
+            # Try fallback locations
+            local fallback_dirs=(
+                "/usr/include/x86_64-linux-gnu/asm"
+                "/usr/include/asm-generic"
+                "/usr/src/linux-headers-$(uname -r)/arch/x86/include/generated/uapi/asm"
+            )
+
+            log_info "Trying fallback locations..."
+            local fallback_found=false
+
+            for fallback_dir in "${fallback_dirs[@]}"; do
+                if [[ -d "$fallback_dir" ]]; then
+                    log_info "Found fallback: $fallback_dir"
+                    if ln -sf "$fallback_dir" /usr/include/asm; then
+                        log_success "✓ asm symlink created using fallback"
+                        fallback_found=true
+                        break
+                    fi
+                fi
+            done
+
+            if [[ "$fallback_found" != "true" ]]; then
+                error_exit "Failed to create asm symlink - no suitable directory found"
+            fi
+        fi
+    else
+        local current_target=$(readlink /usr/include/asm)
+        log_debug "asm symlink already exists: /usr/include/asm -> $current_target"
+
+        # Verify symlink target exists
+        if [[ ! -d "$current_target" ]]; then
+            log_warning "⚠ asm symlink target does not exist, recreating..."
+            rm -f /usr/include/asm
+            # Recursively call this section to recreate
+            if [[ -d "/usr/include/$arch_dir/asm" ]]; then
+                ln -sf "/usr/include/$arch_dir/asm" /usr/include/asm
+                log_success "✓ asm symlink recreated"
+            fi
+        fi
+    fi
+
+    # Verify critical headers are accessible
+    local critical_headers=("asm/types.h" "linux/types.h" "linux/bpf.h")
+    local missing_headers=()
+
+    for header in "${critical_headers[@]}"; do
+        if ! echo "#include <$header>" | clang -E - >/dev/null 2>&1; then
+            missing_headers+=("$header")
+        fi
+    done
+
+    if [[ ${#missing_headers[@]} -eq 0 ]]; then
+        log_success "✓ All critical kernel headers accessible"
+    else
+        log_warning "⚠ Missing or inaccessible headers: ${missing_headers[*]}"
+
+        # Try to fix common issues
+        for header in "${missing_headers[@]}"; do
+            case "$header" in
+                "asm/types.h")
+                    log_info "Attempting to fix asm/types.h accessibility..."
+                    if [[ -f /usr/include/x86_64-linux-gnu/asm/types.h ]]; then
+                        # Ensure symlink is correct
+                        ln -sf /usr/include/x86_64-linux-gnu/asm /usr/include/asm
+                        log_info "Recreated asm symlink"
+                    fi
+                    ;;
+                "linux/types.h")
+                    log_info "Checking linux/types.h availability..."
+                    if [[ ! -f /usr/include/linux/types.h ]]; then
+                        log_warning "linux/types.h not found - may need additional packages"
+                    fi
+                    ;;
+            esac
+        done
+    fi
+
+    log_success "Kernel headers symlinks setup completed"
+}
+
 # Upgrade libbpf to v1.4.0+
 upgrade_libbpf() {
     log_info "Upgrading libbpf to v1.4.0+..."
@@ -877,6 +1000,55 @@ verify_installation() {
         ((warnings++))
     fi
 
+    # Check critical symlinks and header accessibility
+    log_info "Checking kernel headers accessibility..."
+
+    # Check asm symlink
+    if [[ -L /usr/include/asm ]]; then
+        local asm_target=$(readlink /usr/include/asm)
+        log_success "✓ asm symlink exists: /usr/include/asm -> $asm_target"
+    else
+        log_error "✗ asm symlink missing"
+        ((errors++))
+    fi
+
+    # Check critical headers accessibility via compiler
+    local critical_headers=("asm/types.h" "linux/types.h" "linux/bpf.h")
+    local accessible_headers=()
+    local inaccessible_headers=()
+
+    for header in "${critical_headers[@]}"; do
+        if echo "#include <$header>" | clang -E - >/dev/null 2>&1; then
+            accessible_headers+=("$header")
+        else
+            inaccessible_headers+=("$header")
+        fi
+    done
+
+    if [[ ${#accessible_headers[@]} -eq ${#critical_headers[@]} ]]; then
+        log_success "✓ All critical headers accessible via compiler"
+    else
+        log_error "✗ Inaccessible headers: ${inaccessible_headers[*]}"
+        ((errors++))
+    fi
+
+    # Check specific header files existence
+    local header_files=(
+        "/usr/include/asm/types.h"
+        "/usr/include/linux/types.h"
+        "/usr/include/linux/bpf.h"
+        "/usr/include/bpf/bpf_helpers.h"
+    )
+
+    for header_file in "${header_files[@]}"; do
+        if [[ -f "$header_file" ]] || [[ -L "$header_file" ]]; then
+            log_success "✓ $header_file exists"
+        else
+            log_warning "⚠ $header_file missing"
+            ((warnings++))
+        fi
+    done
+
     # Check BPF functionality
     if command -v bpftool >/dev/null 2>&1; then
         if bpftool prog list >/dev/null 2>&1; then
@@ -937,8 +1109,38 @@ test_compilation() {
     mkdir -p "$test_dir"
     cd "$test_dir"
 
-    # Create simple test BPF program
+    # Create comprehensive test BPF program
     cat > test_bpf.c << 'EOF'
+#include <linux/types.h>
+#include <bpf/bpf_helpers.h>
+
+SEC("tracepoint/syscalls/sys_enter_openat")
+int test_openat(void *ctx) {
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    __u64 timestamp = bpf_ktime_get_ns();
+    return 0;
+}
+
+char LICENSE[] SEC("license") = "GPL";
+EOF
+
+    # Test compilation with proper include paths and type definitions
+    log_info "Testing BPF compilation with kernel types..."
+    if clang -target bpf -O2 -I/usr/include -I/usr/include/x86_64-linux-gnu -c test_bpf.c -o test_bpf.o 2>/dev/null; then
+        log_success "✓ Advanced BPF compilation test passed"
+
+        # Verify the compiled object
+        if [[ -f test_bpf.o ]] && [[ -s test_bpf.o ]]; then
+            log_success "✓ BPF object file generated successfully"
+        else
+            log_warning "⚠ BPF object file is empty or invalid"
+        fi
+    else
+        log_warning "⚠ Advanced BPF compilation test failed"
+
+        # Try simpler compilation without kernel types
+        log_info "Attempting fallback BPF compilation test..."
+        cat > test_bpf_simple.c << 'EOF'
 #include <bpf/bpf_helpers.h>
 
 SEC("tracepoint/syscalls/sys_enter_openat")
@@ -949,12 +1151,14 @@ int test_openat(void *ctx) {
 char LICENSE[] SEC("license") = "GPL";
 EOF
 
-    # Test compilation with proper include paths
-    if clang -target bpf -O2 -I/usr/include -I/usr/include/x86_64-linux-gnu -c test_bpf.c -o test_bpf.o 2>/dev/null; then
-        log_success "✓ Basic BPF compilation test passed"
-    else
-        log_warning "⚠ Basic BPF compilation test failed (may need additional setup)"
-        # Don't fail the script for compilation test
+        if clang -target bpf -O2 -c test_bpf_simple.c -o test_bpf_simple.o 2>/dev/null; then
+            log_success "✓ Basic BPF compilation test passed"
+        else
+            log_error "✗ Both advanced and basic BPF compilation tests failed"
+            log_info "This may indicate missing or misconfigured headers"
+        fi
+
+        rm -f test_bpf_simple.c test_bpf_simple.o
     fi
 
     # Test hide_process_bpf compilation if available
@@ -1161,6 +1365,10 @@ main() {
 
     log_info "Installing development packages..."
     install_dev_packages
+    echo ""
+
+    log_info "Setting up kernel headers..."
+    setup_kernel_headers_symlinks
     echo ""
 
     log_info "Upgrading libbpf..."
