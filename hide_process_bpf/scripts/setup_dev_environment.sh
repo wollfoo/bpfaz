@@ -77,10 +77,11 @@ trap cleanup EXIT INT TERM
 # Banner
 print_banner() {
     echo "================================================================"
-    echo "  🛠️  eBPF Development Environment Setup"
+    echo "  🛠️  eBPF Development Environment Setup (Enhanced)"
     echo "  Target: hide_process_bpf module compilation readiness"
     echo "  Environment: Ubuntu 22.04 + Kernel 6.8.0-1026-azure"
-    echo "  Components: clang v15.0+, libbpf v1.4.0+, dev packages"
+    echo "  Components: clang-15.0+, gcc-12.3.0, libbpf v1.4.0+"
+    echo "  Features: Auto-alternatives, LLVM repo, version verification"
     echo "================================================================"
     echo ""
 }
@@ -106,11 +107,14 @@ EXAMPLES:
     $0 -f -s               # Force install without backup (fastest)
 
 COMPONENTS INSTALLED:
-    ✓ clang compiler v15.0+ with BPF target support
+    ✓ clang-15.0+ compiler with BPF target support (auto-configured as default)
+    ✓ gcc-12.3.0 compiler with BPF optimizations (auto-configured as default)
+    ✓ Automatic update-alternatives configuration for both compilers
     ✓ libbpf library upgrade to v1.4.0+
     ✓ Development packages (libbpf-dev, libelf-dev, zlib1g-dev)
     ✓ Build tools optimization
-    ✓ Environment verification
+    ✓ LLVM repository auto-addition for clang-15 (if needed)
+    ✓ Environment verification with specific version checks
 
 SAFETY FEATURES:
     ✓ Pre-flight system compatibility checks
@@ -310,46 +314,101 @@ EOF
 
 # Install clang compiler with BPF support
 install_clang() {
-    log_info "Installing clang compiler with BPF support..."
+    log_info "Installing clang-15 compiler with BPF support..."
 
-    # Check if clang is already installed
+    # Check if clang-15 is already installed and properly configured
+    local current_clang_version=""
+    local clang_15_available=false
+
+    if command -v clang-15 >/dev/null 2>&1; then
+        clang_15_available=true
+        local clang_15_version=$(clang-15 --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        log_debug "Found clang-15 v$clang_15_version"
+    fi
+
     if command -v clang >/dev/null 2>&1; then
-        local clang_version=$(clang --version | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
-        local major_version=$(echo "$clang_version" | cut -d. -f1)
+        current_clang_version=$(clang --version | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+        local major_version=$(echo "$current_clang_version" | cut -d. -f1)
 
-        if [[ $major_version -ge 15 ]] && [[ "$FORCE_INSTALL" != "true" ]]; then
-            log_success "clang v$clang_version already installed (>= v15.0 required)"
+        if [[ $major_version -ge 15 ]] && [[ "$clang_15_available" == "true" ]] && [[ "$FORCE_INSTALL" != "true" ]]; then
+            log_success "clang v$current_clang_version already installed and configured (>= v15.0 required)"
             return 0
-        elif [[ "$FORCE_INSTALL" == "true" ]]; then
-            log_info "Force reinstalling clang (--force specified)"
-        else
-            log_warning "clang v$clang_version found but < v15.0 required. Upgrading..."
         fi
     fi
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        log_info "[DRY-RUN] Would install: clang llvm"
+        log_info "[DRY-RUN] Would install: clang-15 llvm-15-dev"
+        log_info "[DRY-RUN] Would add LLVM repository if needed"
+        log_info "[DRY-RUN] Would configure clang-15 as default"
         return 0
     fi
 
-    # Update package lists
+    # Update package lists first
     log_info "Updating package lists..."
     apt update -qq
 
-    # Install clang and LLVM
-    log_info "Installing clang and LLVM packages..."
-    apt install -y clang llvm
+    # Check if clang-15 is available in current repositories
+    if ! apt-cache show clang-15 >/dev/null 2>&1; then
+        log_info "clang-15 not available in default repositories. Adding LLVM repository..."
 
-    # Verify installation
-    if ! command -v clang >/dev/null 2>&1; then
-        error_exit "clang installation failed"
+        # Add LLVM GPG key
+        log_info "Adding LLVM GPG key..."
+        if ! wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -; then
+            error_exit "Failed to add LLVM GPG key"
+        fi
+
+        # Add LLVM repository for Ubuntu 22.04 (jammy)
+        log_info "Adding LLVM repository for Ubuntu 22.04..."
+        echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-15 main" > /etc/apt/sources.list.d/llvm.list
+
+        # Update package lists again
+        log_info "Updating package lists with LLVM repository..."
+        apt update -qq
     fi
 
-    local installed_version=$(clang --version | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
-    local major_version=$(echo "$installed_version" | cut -d. -f1)
+    # Install clang-15 and related packages
+    log_info "Installing clang-15 and LLVM-15 packages..."
+    if ! apt install -y clang-15 llvm-15-dev; then
+        error_exit "Failed to install clang-15 packages"
+    fi
 
-    if [[ $major_version -lt 15 ]]; then
-        error_exit "Installed clang version $installed_version < required v15.0"
+    # Verify clang-15 installation
+    if ! command -v clang-15 >/dev/null 2>&1; then
+        error_exit "clang-15 installation verification failed"
+    fi
+
+    # Configure clang-15 as default using update-alternatives
+    log_info "Configuring clang-15 as default clang..."
+
+    # Remove existing clang alternatives
+    update-alternatives --remove-all clang 2>/dev/null || true
+    update-alternatives --remove-all clang++ 2>/dev/null || true
+
+    # Install clang-15 as highest priority alternative
+    update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 150
+
+    # Install clang++-15 if available
+    if command -v clang++-15 >/dev/null 2>&1; then
+        update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-15 150
+    fi
+
+    # Add clang-14 as lower priority alternative if it exists
+    if command -v clang-14 >/dev/null 2>&1; then
+        update-alternatives --install /usr/bin/clang clang /usr/bin/clang-14 140
+        if command -v clang++-14 >/dev/null 2>&1; then
+            update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-14 140
+        fi
+        log_debug "Added clang-14 as alternative with lower priority"
+    fi
+
+    # Verify clang-15 is now default
+    local new_clang_version=$(clang --version | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    local new_major_version=$(echo "$new_clang_version" | cut -d. -f1)
+
+    if [[ $new_major_version -eq 15 ]]; then
+        log_success "clang-15 v$new_clang_version set as default compiler"
+    else
+        error_exit "clang-15 installed but not set as default (current: v$new_clang_version)"
     fi
 
     # Test BPF target support
@@ -359,21 +418,30 @@ install_clang() {
     fi
     rm -f /tmp/test_bpf.o
 
-    log_success "clang v$installed_version installed with BPF support"
+    log_success "clang-15 v$new_clang_version installed and configured with BPF support"
 }
 
 # Install and optimize gcc for BPF compilation
 install_gcc_optimization() {
-    log_info "Installing gcc-12 with BPF optimizations..."
+    log_info "Installing gcc-12.3.0 with BPF optimizations..."
 
-    # Check current gcc version
+    # Check current gcc and gcc-12 versions
     local current_gcc_version=""
+    local gcc_12_available=false
+    local gcc_12_version=""
+
+    if command -v gcc-12 >/dev/null 2>&1; then
+        gcc_12_available=true
+        gcc_12_version=$(gcc-12 --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        log_debug "Found gcc-12 v$gcc_12_version"
+    fi
+
     if command -v gcc >/dev/null 2>&1; then
         current_gcc_version=$(gcc --version | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
         local major_version=$(echo "$current_gcc_version" | cut -d. -f1)
 
-        if [[ $major_version -ge 12 ]] && [[ "$FORCE_INSTALL" != "true" ]]; then
-            log_success "gcc v$current_gcc_version already installed (>= v12.0 required)"
+        if [[ $major_version -ge 12 ]] && [[ "$gcc_12_available" == "true" ]] && [[ "$FORCE_INSTALL" != "true" ]]; then
+            log_success "gcc v$current_gcc_version already installed and configured (>= v12.0 required)"
             return 0
         elif [[ "$FORCE_INSTALL" == "true" ]]; then
             log_info "Force reinstalling gcc-12 (--force specified)"
@@ -385,14 +453,14 @@ install_gcc_optimization() {
     fi
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        log_info "[DRY-RUN] Would install: gcc-12 g++-12"
-        log_info "[DRY-RUN] Would set gcc-12 as default compiler"
+        log_info "[DRY-RUN] Would install: gcc-12 g++-12 libstdc++-12-dev"
+        log_info "[DRY-RUN] Would configure gcc-12 as default using update-alternatives"
         return 0
     fi
 
-    # Install gcc-12 and g++-12
-    log_info "Installing gcc-12 and g++-12 packages..."
-    if ! apt install -y gcc-12 g++-12; then
+    # Install gcc-12, g++-12 and related development libraries
+    log_info "Installing gcc-12, g++-12 and development libraries..."
+    if ! apt install -y gcc-12 g++-12 libstdc++-12-dev; then
         error_exit "Failed to install gcc-12 packages"
     fi
 
@@ -401,33 +469,44 @@ install_gcc_optimization() {
         error_exit "gcc-12 installation verification failed"
     fi
 
-    # Set up alternatives for gcc and g++
-    log_info "Setting up gcc-12 as default compiler..."
+    if ! command -v g++-12 >/dev/null 2>&1; then
+        error_exit "g++-12 installation verification failed"
+    fi
+
+    # Configure gcc-12 as default using update-alternatives with slave links
+    log_info "Configuring gcc-12 as default compiler using update-alternatives..."
 
     # Remove existing alternatives (if any)
     update-alternatives --remove-all gcc 2>/dev/null || true
     update-alternatives --remove-all g++ 2>/dev/null || true
 
-    # Install gcc alternatives with priority
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 120
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 120
+    # Install gcc-12 as highest priority alternative with g++ as slave
+    log_info "Setting up gcc-12 with g++-12 as slave link..."
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 120 --slave /usr/bin/g++ g++ /usr/bin/g++-12
 
-    # If gcc-11 exists, add it with lower priority
-    if command -v gcc-11 >/dev/null 2>&1; then
-        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 110
-        update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 110
-        log_debug "Added gcc-11 as alternative with lower priority"
+    # Add gcc-11 as lower priority alternative if it exists
+    if command -v gcc-11 >/dev/null 2>&1 && command -v g++-11 >/dev/null 2>&1; then
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 110 --slave /usr/bin/g++ g++ /usr/bin/g++-11
+        log_debug "Added gcc-11 with g++-11 as alternative with lower priority"
     fi
 
     # Verify gcc-12 is now default
-    local new_gcc_version=$(gcc --version | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    local new_gcc_version=$(gcc --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    local new_gpp_version=$(g++ --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
     local new_major_version=$(echo "$new_gcc_version" | cut -d. -f1)
 
     if [[ $new_major_version -eq 12 ]]; then
         log_success "gcc-12 v$new_gcc_version set as default compiler"
+        log_success "g++-12 v$new_gpp_version set as default C++ compiler"
     else
-        log_warning "gcc-12 installed but not set as default (current: v$new_gcc_version)"
+        error_exit "gcc-12 installed but not set as default (current: v$new_gcc_version)"
     fi
+
+    # Display alternatives configuration
+    log_info "Current gcc alternatives configuration:"
+    update-alternatives --display gcc | grep -E "(gcc|priority)" | head -10 | while read line; do
+        log_debug "  $line"
+    done
 
     # Test BPF-related compilation capabilities
     log_info "Testing gcc-12 BPF optimization capabilities..."
@@ -440,6 +519,14 @@ install_gcc_optimization() {
         log_warning "gcc-12 basic compilation test failed"
     fi
 
+    # Test C++ compilation
+    if echo 'int main() { return 0; }' | g++ -c -x c++ - -o /tmp/test_gpp.o 2>/dev/null; then
+        log_success "g++-12 basic compilation test passed"
+        rm -f /tmp/test_gpp.o
+    else
+        log_warning "g++-12 basic compilation test failed"
+    fi
+
     # Test optimization flags
     if echo 'int main() { return 0; }' | gcc -O2 -march=native -c -x c - -o /tmp/test_gcc_opt.o 2>/dev/null; then
         log_success "gcc-12 optimization flags test passed"
@@ -448,7 +535,7 @@ install_gcc_optimization() {
         log_warning "gcc-12 optimization flags test failed"
     fi
 
-    log_success "gcc-12 installed and optimized for BPF compilation"
+    log_success "gcc-12 v$new_gcc_version installed and optimized for BPF compilation"
 }
 
 # Install development packages
@@ -635,13 +722,38 @@ verify_installation() {
     local errors=0
     local warnings=0
 
-    # Check clang
+    # Check clang-15 specifically
     if command -v clang >/dev/null 2>&1; then
-        local clang_version=$(clang --version | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+        local clang_version=$(clang --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
         local major_version=$(echo "$clang_version" | cut -d. -f1)
 
-        if [[ $major_version -ge 15 ]]; then
-            log_success "✓ clang v$clang_version (>= v15.0 required)"
+        if [[ $major_version -eq 15 ]]; then
+            log_success "✓ clang v$clang_version (clang-15 required)"
+
+            # Check if clang-15 binary exists
+            if command -v clang-15 >/dev/null 2>&1; then
+                local clang_15_version=$(clang-15 --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+                log_success "✓ clang-15 v$clang_15_version available"
+            else
+                log_warning "⚠ clang-15 binary not found (using clang v$clang_version)"
+                ((warnings++))
+            fi
+
+            # Check alternatives configuration
+            if update-alternatives --display clang >/dev/null 2>&1; then
+                local current_alternative=$(update-alternatives --display clang | grep "link currently points to" | awk '{print $NF}')
+                if [[ "$current_alternative" == *"clang-15"* ]]; then
+                    log_success "✓ clang alternatives configured correctly (points to clang-15)"
+                else
+                    log_warning "⚠ clang alternatives not pointing to clang-15 (current: $current_alternative)"
+                    ((warnings++))
+                fi
+            else
+                log_warning "⚠ clang alternatives not configured"
+                ((warnings++))
+            fi
+        elif [[ $major_version -gt 15 ]]; then
+            log_success "✓ clang v$clang_version (> v15.0 required)"
         else
             log_error "✗ clang v$clang_version < v15.0 required"
             ((errors++))
@@ -660,13 +772,53 @@ verify_installation() {
         ((errors++))
     fi
 
-    # Check gcc optimization
+    # Check gcc-12 specifically
     if command -v gcc >/dev/null 2>&1; then
-        local gcc_version=$(gcc --version | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+        local gcc_version=$(gcc --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
         local gcc_major_version=$(echo "$gcc_version" | cut -d. -f1)
 
-        if [[ $gcc_major_version -ge 12 ]]; then
-            log_success "✓ gcc v$gcc_version (>= v12.0 for BPF optimization)"
+        if [[ $gcc_major_version -eq 12 ]]; then
+            log_success "✓ gcc v$gcc_version (gcc-12 required)"
+
+            # Check if gcc-12 binary exists
+            if command -v gcc-12 >/dev/null 2>&1; then
+                local gcc_12_version=$(gcc-12 --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+                log_success "✓ gcc-12 v$gcc_12_version available"
+            else
+                log_warning "⚠ gcc-12 binary not found (using gcc v$gcc_version)"
+                ((warnings++))
+            fi
+
+            # Check g++ version
+            if command -v g++ >/dev/null 2>&1; then
+                local gpp_version=$(g++ --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+                local gpp_major_version=$(echo "$gpp_version" | cut -d. -f1)
+                if [[ $gpp_major_version -eq 12 ]]; then
+                    log_success "✓ g++ v$gpp_version (g++-12 required)"
+                else
+                    log_warning "⚠ g++ v$gpp_version not version 12"
+                    ((warnings++))
+                fi
+            else
+                log_error "✗ g++ not found"
+                ((errors++))
+            fi
+
+            # Check alternatives configuration
+            if update-alternatives --display gcc >/dev/null 2>&1; then
+                local current_gcc_alternative=$(update-alternatives --display gcc | grep "link currently points to" | awk '{print $NF}')
+                if [[ "$current_gcc_alternative" == *"gcc-12"* ]]; then
+                    log_success "✓ gcc alternatives configured correctly (points to gcc-12)"
+                else
+                    log_warning "⚠ gcc alternatives not pointing to gcc-12 (current: $current_gcc_alternative)"
+                    ((warnings++))
+                fi
+            else
+                log_warning "⚠ gcc alternatives not configured"
+                ((warnings++))
+            fi
+        elif [[ $gcc_major_version -gt 12 ]]; then
+            log_success "✓ gcc v$gcc_version (> v12.0 for BPF optimization)"
         else
             log_warning "⚠ gcc v$gcc_version < v12.0 (optimization recommended)"
             ((warnings++))
@@ -814,6 +966,56 @@ EOF
     log_success "Compilation testing completed"
 }
 
+# Display compiler configuration summary
+display_compiler_config() {
+    log_info "📊 Compiler Configuration Summary:"
+    echo ""
+
+    # Show clang configuration
+    if command -v clang >/dev/null 2>&1; then
+        local clang_version=$(clang --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        echo "🔧 Clang Configuration:"
+        echo "   Default clang: v$clang_version"
+
+        if command -v clang-15 >/dev/null 2>&1; then
+            local clang_15_version=$(clang-15 --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+            echo "   clang-15: v$clang_15_version"
+        fi
+
+        if update-alternatives --display clang >/dev/null 2>&1; then
+            echo "   Alternatives: Configured"
+            local current_clang=$(update-alternatives --display clang | grep "link currently points to" | awk '{print $NF}')
+            echo "   Current link: $current_clang"
+        else
+            echo "   Alternatives: Not configured"
+        fi
+        echo ""
+    fi
+
+    # Show gcc configuration
+    if command -v gcc >/dev/null 2>&1; then
+        local gcc_version=$(gcc --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        local gpp_version=$(g++ --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        echo "🔧 GCC Configuration:"
+        echo "   Default gcc: v$gcc_version"
+        echo "   Default g++: v$gpp_version"
+
+        if command -v gcc-12 >/dev/null 2>&1; then
+            local gcc_12_version=$(gcc-12 --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+            echo "   gcc-12: v$gcc_12_version"
+        fi
+
+        if update-alternatives --display gcc >/dev/null 2>&1; then
+            echo "   Alternatives: Configured"
+            local current_gcc=$(update-alternatives --display gcc | grep "link currently points to" | awk '{print $NF}')
+            echo "   Current link: $current_gcc"
+        else
+            echo "   Alternatives: Not configured"
+        fi
+        echo ""
+    fi
+}
+
 # Print installation summary
 print_summary() {
     echo ""
@@ -824,15 +1026,30 @@ print_summary() {
     echo "📋 Installation Summary:"
     echo ""
 
-    # Show installed versions
+    # Show installed versions with specific version numbers
     if command -v clang >/dev/null 2>&1; then
-        local clang_version=$(clang --version | head -1)
-        echo "✅ clang: $clang_version"
+        local clang_version=$(clang --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        echo "✅ clang: v$clang_version (default)"
+
+        if command -v clang-15 >/dev/null 2>&1; then
+            local clang_15_version=$(clang-15 --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+            echo "✅ clang-15: v$clang_15_version (specific binary)"
+        fi
     fi
 
     if command -v gcc >/dev/null 2>&1; then
-        local gcc_version=$(gcc --version | head -1)
-        echo "✅ gcc: $gcc_version (optimized for BPF)"
+        local gcc_version=$(gcc --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        echo "✅ gcc: v$gcc_version (default, optimized for BPF)"
+
+        if command -v gcc-12 >/dev/null 2>&1; then
+            local gcc_12_version=$(gcc-12 --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+            echo "✅ gcc-12: v$gcc_12_version (specific binary)"
+        fi
+
+        if command -v g++ >/dev/null 2>&1; then
+            local gpp_version=$(g++ --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+            echo "✅ g++: v$gpp_version (default C++ compiler)"
+        fi
     fi
 
     if ldconfig -p | grep -q "libbpf"; then
@@ -852,6 +1069,10 @@ print_summary() {
     fi
 
     echo ""
+
+    # Display detailed compiler configuration
+    display_compiler_config
+
     echo "🎯 Next Steps:"
     echo ""
     echo "1. Test hide_process_bpf compilation:"
@@ -864,6 +1085,12 @@ print_summary() {
     echo "3. Verify BPF functionality:"
     echo "   sudo bpftool prog list"
     echo "   sudo bpftool map list"
+    echo ""
+    echo "4. Test compiler versions:"
+    echo "   clang --version"
+    echo "   gcc --version"
+    echo "   update-alternatives --display clang"
+    echo "   update-alternatives --display gcc"
     echo ""
     echo "📁 Files created:"
     echo "   📋 Log file: $LOG_FILE"
