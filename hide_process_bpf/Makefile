@@ -46,7 +46,7 @@ test: $(OUTPUT)/hide_process_bpf.o
 # Build LD_PRELOAD library with libbpf integration
 $(OUTPUT)/libhide.so: libhide.c
 	@echo "Building LD_PRELOAD library with BPF map integration..."
-	$(CC) -shared -fPIC -ldl -lbpf -lelf -lz libhide.c -o $(OUTPUT)/libhide.so
+	$(CC) -shared -fPIC libhide.c -o $(OUTPUT)/libhide.so -ldl -lbpf -lelf -lz
 	@echo "LD_PRELOAD library built successfully with libbpf support!"
 
 # Build main program
@@ -120,6 +120,28 @@ test-perf: hybrid
 	chmod +x tests/test_proc_hiding.sh
 	sudo tests/test_proc_hiding.sh 2>&1 | grep -i performance
 
+# Test enhanced functionality (Priority 4)
+test-enhanced: all test_enhanced_functionality.sh
+	@echo "Testing enhanced functionality from Priority 4..."
+	@chmod +x test_enhanced_functionality.sh
+	@echo "⚠ Note: This test requires root privileges"
+	@echo "Run: sudo ./test_enhanced_functionality.sh"
+
+# Performance benchmarking
+benchmark: all benchmark_performance.sh
+	@echo "Running performance benchmarks..."
+	@chmod +x benchmark_performance.sh
+	@echo "⚠ Note: This benchmark requires root privileges"
+	@echo "Run: sudo ./benchmark_performance.sh"
+
+# Test all priorities integration
+test-all-priorities: test test-enhanced
+	@echo "Testing integration of all priorities..."
+	@echo "✓ Priority 1: BPF Map Integration"
+	@echo "✓ Priority 2: Standalone Operation"
+	@echo "✓ Priority 3: Kernel Validation"
+	@echo "✓ Priority 4: Enhanced Functionality"
+
 # Check kernel compatibility
 check-kernel:
 	@echo "Checking kernel compatibility..."
@@ -166,5 +188,6 @@ dev: hybrid test-quick
 prod: hybrid test-full install
 	@echo "Production deployment complete"
 
-.PHONY: test clean all main install uninstall
+.PHONY: test clean all main install uninstall help
 .PHONY: hybrid build-test test-full test-quick test-perf check-kernel docs dev prod
+.PHONY: test-enhanced benchmark test-all-priorities

@@ -144,18 +144,64 @@ static __always_inline bool is_in_container_namespace(void)
     return level > 0;  /* Container processes have level > 0 */
 }
 
-/* Check if process has container-related cgroup */
+/* Check if process has container-related cgroup with real cgroup v2 analysis */
 static __always_inline bool is_in_container_cgroup(void)
 {
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     if (!task)
         return false;
 
-    /* This is a simplified check - in production you'd read cgroup path */
-    /* and check for patterns like "/docker/", "/containerd/", "/k8s/" */
+    /* Get cgroup from task */
+    struct cgroup *cgrp = BPF_CORE_READ(task, cgroups, dfl_cgrp);
+    if (!cgrp)
+        return false;
 
-    /* For now, we'll use a heuristic based on process hierarchy */
-    return false;  /* Placeholder - would need more complex cgroup parsing */
+    /* Read cgroup path components to detect container patterns */
+    struct kernfs_node *kn = BPF_CORE_READ(cgrp, kn);
+    if (!kn)
+        return false;
+
+    /* Check cgroup path for container indicators */
+    char name[64];
+    int ret = bpf_probe_read_kernel_str(name, sizeof(name), BPF_CORE_READ(kn, name));
+    if (ret < 0)
+        return false;
+
+    /* Check for common container runtime patterns */
+    /* Docker containers: typically have "docker" in path */
+    if (name[0] == 'd' && name[1] == 'o' && name[2] == 'c' && name[3] == 'k')
+        return true;
+
+    /* Containerd containers: typically have long hex IDs */
+    if (ret >= 32) {  /* Long hex string indicates container ID */
+        int hex_count = 0;
+        for (int i = 0; i < ret && i < 32; i++) {
+            if ((name[i] >= '0' && name[i] <= '9') ||
+                (name[i] >= 'a' && name[i] <= 'f') ||
+                (name[i] >= 'A' && name[i] <= 'F')) {
+                hex_count++;
+            } else {
+                break;
+            }
+        }
+        if (hex_count >= 12) {  /* Likely container ID */
+            return true;
+        }
+    }
+
+    /* Kubernetes pods: check for "pod" prefix */
+    if (name[0] == 'p' && name[1] == 'o' && name[2] == 'd')
+        return true;
+
+    /* LXC containers: check for "lxc" prefix */
+    if (name[0] == 'l' && name[1] == 'x' && name[2] == 'c')
+        return true;
+
+    /* systemd-nspawn: check for machine.slice */
+    if (name[0] == 'm' && name[1] == 'a' && name[2] == 'c' && name[3] == 'h')
+        return true;
+
+    return false;
 }
 
 /* Check parent process for container runtime */

