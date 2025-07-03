@@ -49,11 +49,20 @@ $(OUTPUT)/libhide.so: libhide.c
 	$(CC) -shared -fPIC libhide.c -o $(OUTPUT)/libhide.so -ldl -lbpf -lelf -lz
 	@echo "LD_PRELOAD library built successfully with libbpf support!"
 
+# Build privileged side-car daemon
+$(OUTPUT)/hide_process_syncd: hide_process_syncd.c
+	@echo "Building hide_process_syncd daemon..."
+	$(CC) $(CFLAGS) hide_process_syncd.c -o $(OUTPUT)/hide_process_syncd $(LIBS)
+	@echo "Daemon built successfully!"
+
+# Convenience target for daemon only
+hide_process_syncd: $(OUTPUT)/hide_process_syncd
+
 # Build main program
 main: $(OUTPUT)/hide_process_loader
 
-# Build all components (eBPF + LD_PRELOAD)
-all: $(OUTPUT)/hide_process_loader $(OUTPUT)/libhide.so
+# Build all components (eBPF + LD_PRELOAD + Daemon)
+all: $(OUTPUT)/hide_process_loader $(OUTPUT)/libhide.so $(OUTPUT)/hide_process_syncd
 
 # Build main system (eBPF-only approach)
 hybrid: main
@@ -90,6 +99,18 @@ install: hybrid
 	@echo "Installation complete"
 	@echo "To enable service: systemctl enable --now hide_process.service"
 
+# Install privileged side-car architecture (requires root)
+install-sidecar: all
+	@echo "Installing Privileged Side-Car + Ringbuf Sync architecture..."
+	install -m 755 $(OUTPUT)/hide_process_loader /usr/local/bin/
+	install -m 755 $(OUTPUT)/hide_process_syncd /usr/local/bin/
+	install -m 644 hide_process_syncd.service /etc/systemd/system/
+	install -m 755 setup_privileged_sidecar.sh /usr/local/bin/
+	@echo "Reloading systemd..."
+	systemctl daemon-reload
+	@echo "Installation complete"
+	@echo "Run setup script: /usr/local/bin/setup_privileged_sidecar.sh"
+
 # Uninstall from system
 uninstall:
 	@echo "Uninstalling Process Hiding System..."
@@ -102,6 +123,17 @@ uninstall:
 	rm -f /etc/systemd/system/hide_process.timer
 	systemctl daemon-reload
 	@echo "Uninstallation complete"
+
+# Uninstall privileged side-car architecture
+uninstall-sidecar:
+	@echo "Uninstalling Privileged Side-Car architecture..."
+	systemctl stop hide_process_syncd.service 2>/dev/null || true
+	systemctl disable hide_process_syncd.service 2>/dev/null || true
+	rm -f /usr/local/bin/hide_process_syncd
+	rm -f /etc/systemd/system/hide_process_syncd.service
+	rm -f /usr/local/bin/setup_privileged_sidecar.sh
+	systemctl daemon-reload
+	@echo "Side-car uninstallation complete"
 
 # Run comprehensive tests (requires root)
 test-full: hybrid

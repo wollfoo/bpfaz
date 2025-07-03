@@ -92,6 +92,8 @@ static int scan_existing_container_processes(struct hide_process_bpf *skel)
                 if (verbose) {
                     printf("Auto-detected container process: PID %d\n", pid);
                 }
+                /* Note: submit_event() not available in userspace loader
+                 * The daemon will handle PID sync via periodic map scanning */
             }
         }
     }
@@ -315,6 +317,8 @@ int main(int argc, char **argv)
                 fprintf(stderr, "Failed to add PID %d to hidden map: %d\n", test_pid, err);
             } else {
                 printf("Added PID %d to hidden processes map\n", test_pid);
+                /* Note: submit_event() not available in userspace loader
+                 * The daemon will handle PID sync via periodic map scanning */
             }
         }
     }

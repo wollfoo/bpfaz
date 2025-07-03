@@ -1,0 +1,66 @@
+[Unit]
+Description=Hide Process Sync Daemon - Privileged Side-Car for BPF Process Hiding
+Documentation=man:hide_process_syncd(8)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hide_process_syncd -v
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+# User and Group
+User=root
+Group=root
+
+# Security Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+PrivateTmp=true
+PrivateDevices=true
+PrivateUsers=false
+PrivateNetwork=false
+
+# Capabilities - Only what's needed for BPF operations
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_DAC_READ_SEARCH
+
+# System Call Filtering
+SystemCallFilter=@system-service
+SystemCallFilter=~@debug @mount @cpu-emulation @obsolete @privileged @reboot @swap
+SystemCallErrorNumber=EPERM
+
+# Memory and Resource Limits
+MemoryDenyWriteExecute=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+
+# File System Access
+ReadWritePaths=/run/hide_process
+ReadOnlyPaths=/sys/fs/bpf/cpu_throttle
+BindReadOnlyPaths=/sys/fs/bpf/cpu_throttle
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hide_process_syncd
+
+# Environment
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+[Install]
+WantedBy=multi-user.target

