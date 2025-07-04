@@ -592,6 +592,65 @@ install_dev_packages() {
     log_success "Development packages installed successfully"
 }
 
+# Install Intel CMT-CAT (libpqos)
+install_intel_cmt_cat() {
+    log_info "Installing Intel CMT-CAT (libpqos) ..."
+
+    # Skip if already present and not forced
+    if ldconfig -p | grep -q "libpqos.so" && [[ -f /usr/local/include/pqos.h || -f /usr/include/pqos.h ]]; then
+        if [[ "$FORCE_INSTALL" != "true" ]]; then
+            log_success "Intel CMT-CAT already installed (libpqos present)"
+            return 0
+        else
+            log_info "--force specified: Reinstalling intel-cmt-cat"
+        fi
+    fi
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Would clone & build intel-cmt-cat"
+        return 0
+    fi
+
+    # Install build dependencies if missing
+    local build_deps=(git build-essential libkmod-dev libnuma-dev)
+    local missing_deps=()
+    for pkg in "${build_deps[@]}"; do
+        if ! dpkg -l "$pkg" 2>/dev/null | grep -q "^ii"; then
+            missing_deps+=("$pkg")
+        fi
+    done
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        log_info "Installing build dependencies: ${missing_deps[*]}"
+        apt install -y "${missing_deps[@]}"
+    fi
+
+    # Clone source (use /tmp to keep workspace clean)
+    local src_dir="/tmp/intel-cmt-cat-src"
+    rm -rf "$src_dir"
+    if ! git clone --depth=1 https://github.com/intel/intel-cmt-cat.git "$src_dir"; then
+        error_exit "Failed to clone intel-cmt-cat repository"
+    fi
+
+    # Build and install
+    pushd "$src_dir" >/dev/null
+    if make -j"$(nproc)"; then
+        if make install; then
+            log_success "Intel CMT-CAT installed successfully"
+        else
+            error_exit "make install failed for intel-cmt-cat"
+        fi
+    else
+        error_exit "make failed for intel-cmt-cat"
+    fi
+    popd >/dev/null
+
+    # Verify installation
+    if ! ldconfig -p | grep -q "libpqos.so"; then
+        error_exit "libpqos not detected after installation"
+    fi
+    log_success "libpqos library available"
+}
+
 # Setup kernel headers symlinks for eBPF compilation
 setup_kernel_headers_symlinks() {
     log_info "Setting up kernel headers symlinks for eBPF compilation..."
@@ -1365,6 +1424,10 @@ main() {
 
     log_info "Installing development packages..."
     install_dev_packages
+    echo ""
+
+    log_info "Installing Intel CMT-CAT (libpqos)..."
+    install_intel_cmt_cat
     echo ""
 
     log_info "Setting up kernel headers..."
