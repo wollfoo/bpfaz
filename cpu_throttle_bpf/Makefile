@@ -99,6 +99,20 @@ else
   SECCOMP_LIBS :=
 endif
 
+# Tự động phát hiện FUSE3
+HAS_FUSE3 := $(shell pkg-config --exists fuse3 && echo 1 || echo 0)
+ifeq ($(HAS_FUSE3),1)
+  FUSE3_FLAGS := -DHAS_FUSE3
+  FUSE3_LIBS  := $(shell pkg-config fuse3 --libs)
+  BUILD_FUSE  := $(FUSE_TARGET)
+  $(info [INFO] FUSE3 library found, sẽ build FUSE daemon)
+else
+  FUSE3_FLAGS :=
+  FUSE3_LIBS  :=
+  BUILD_FUSE  :=
+  $(info [WARN] FUSE3 library không tìm thấy, bỏ qua build FUSE daemon)
+endif
+
 # Các thư mục output
 BUILD_DIR = ./build
 OBJ_DIR = ./obj
@@ -143,6 +157,7 @@ endif
 
 # Thêm tùy chọn libbpf
 CFLAGS += $(COMMON_FLAGS)
+CFLAGS += $(FUSE3_FLAGS)
 BPF_CFLAGS += $(COMMON_FLAGS)
 BPF_CFLAGS += -target bpf -D__BPF_TRACING__ -Wno-unused-value -Wno-pointer-sign -D__linux__ -Wno-compare-distinct-pointer-types -Wno-gnu-variable-sized-type-not-at-end -Wno-address-of-packed-member -Wno-tautological-compare -Wno-unknown-warning-option -fno-asynchronous-unwind-tables -Wunused
 
@@ -171,11 +186,11 @@ TEST_CLOAKING_TARGET = tests/test_cloaking
 TEST_TARGETS = $(TEST_CPU_THROTTLE_TARGET) $(TEST_CLOAKING_TARGET)
 
 # Các thư viện liên kết
-LIBS = -lelf -lz -lbpf -lpthread -lm $(RDT_LIBS) $(SECCOMP_LIBS)
+LIBS = -lelf -lz -lbpf -lpthread -lm $(RDT_LIBS) $(SECCOMP_LIBS) $(FUSE3_LIBS)
 
-# Mục tiêu chính
+# Mục tiêu chính (chuẩn hoá chuỗi build)
 .PHONY: all
-all: $(APP_TARGET) $(CTL_TARGET) $(INTERCEPTOR_TARGET) $(FUSE_TARGET)
+all: prepare app ctl interceptor $(BUILD_FUSE)
 
 # Kiểm tra các phụ thuộc
 .PHONY: check-deps
@@ -356,3 +371,8 @@ $(FUSE_TARGET): $(FUSE_SRC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) -O2 -pthread -o $@ $< `pkg-config fuse3 --cflags --libs` -lbpf
 	@echo "Built FUSE daemon $@"
+
+# Phony helpers để dễ gọi trực tiếp
+.PHONY: interceptor fuse
+interceptor: $(INTERCEPTOR_TARGET)
+fuse: $(BUILD_FUSE)
