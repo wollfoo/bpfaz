@@ -1,0 +1,3 @@
+#define BUILD_VERSION ""
+#define BUILD_DATE "2025-07-04 17:41:47"
+#define BUILD_ARCH "x86"
