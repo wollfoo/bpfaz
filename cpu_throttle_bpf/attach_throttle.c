@@ -601,6 +601,8 @@ static int setup_ring_buffer(void) {
     if (opt.verbose)
         printf("Ring buffer đã được thiết lập\n");
     
+    if (opt.verbose) printf("Sau setup_ring_buffer()\n");
+    
     return 0;
 }
 
@@ -926,11 +928,14 @@ static void update_cloaking_config(void) {
         .detection_defense = 1, /* Bật phòng thủ cơ bản */
         .sampling_rate = opt.collection_interval_ms,
     };
-    
-    int map_fd = bpf_map__fd(skel->maps.cloaking_cfg);
-    if (map_fd >= 0) {
-        u32 key = 0;
-        bpf_map_update_elem(map_fd, &key, &cfg, BPF_ANY);
+
+    /* Thêm kiểm tra để đảm bảo cloaking_cfg map tồn tại trước khi truy cập */
+    if (skel && skel->maps.cloaking_cfg) {
+        int map_fd = bpf_map__fd(skel->maps.cloaking_cfg);
+        if (map_fd >= 0) {
+            u32 key = 0;
+            bpf_map_update_elem(map_fd, &key, &cfg, BPF_ANY);
+        }
     }
 }
 
@@ -953,7 +958,12 @@ static void setup_collection_methods(void) {
         }
     }
     
+    if (opt.verbose) printf("active_methods mask=0x%x\n", active_methods);
+    
     /* Cập nhật vào rodata */
+    if (opt.verbose) {
+        printf("skel->rodata ptr=%p\n", (void*)skel->rodata);
+    }
     if (skel->rodata) {
         skel->rodata->g_active_methods = active_methods;
         skel->rodata->g_preferred_method = opt.preferred_method;
@@ -969,6 +979,8 @@ static void setup_collection_methods(void) {
                     sizeof(skel->rodata->hwmon_path) - 1);
         }
     }
+    
+    if (opt.verbose) printf("setup_collection_methods: active_methods=0x%x\n", active_methods);
 }
 
 /* Tạo thư mục pin nếu cần */
@@ -1210,14 +1222,28 @@ int main(int argc, char **argv) {
     /* Thiết lập các phương pháp thu thập */
     setup_collection_methods();
     
+    if (opt.verbose) printf("Gọi update_cloaking_config...\n");
     /* Cập nhật cấu hình cloaking */
     update_cloaking_config();
+    if (opt.verbose) printf("update_cloaking_config xong\n");
     
     /* Gắn chương trình vào tracepoint */
+    if (opt.verbose) {
+        printf("Đang gắn chương trình on_switch...\n");
+    }
+    if (!skel->progs.on_switch) {
+        fprintf(stderr,
+                "Chương trình BPF on_switch không tồn tại (có thể do kernel không hỗ trợ hoặc load thất bại)\n");
+        err = -ENOENT;
+        goto cleanup;
+    }
+
     link = bpf_program__attach(skel->progs.on_switch);
     if (!link) {
         err = -errno;
-        fprintf(stderr, "Không thể gắn tracepoint sched_switch: %d\n", err);
+        fprintf(stderr,
+                "Không thể gắn tracepoint sched_switch: %s\n",
+                strerror(errno));
         goto cleanup;
     }
 

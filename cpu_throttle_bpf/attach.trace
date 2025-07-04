@@ -1,0 +1,144 @@
+90015 execve("./obj/attach_throttle", ["./obj/attach_throttle", "-v"], 0x7ffebdeae6e0 /* 40 vars */) = 0
+90015 brk(NULL)                         = 0x5d9b8f2b1000
+90015 arch_prctl(0x3001 /* ARCH_??? */, 0x7ffd35a4b890) = -1 EINVAL (Invalid argument)
+90015 mmap(NULL, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7c52d71b4000
+90015 access("/etc/ld.so.preload", R_OK) = -1 ENOENT (No such file or directory)
+90015 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+90015 newfstatat(3, "", {st_mode=S_IFREG|0644, st_size=34047, ...}, AT_EMPTY_PATH) = 0
+90015 mmap(NULL, 34047, PROT_READ, MAP_PRIVATE, 3, 0) = 0x7c52d71ab000
+90015 close(3)                          = 0
+90015 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libbpf.so.1", O_RDONLY|O_CLOEXEC) = 3
+90015 read(3, "\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0\0\0\0\0\0\0\0\0"..., 832) = 832
+90015 newfstatat(3, "", {st_mode=S_IFREG|0755, st_size=1713328, ...}, AT_EMPTY_PATH) = 0
+90015 mmap(NULL, 411936, PROT_READ, MAP_PRIVATE|MAP_DENYWRITE, 3, 0) = 0x7c52d7146000
+90015 mmap(0x7c52d7151000, 253952, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0xb000) = 0x7c52d7151000
+90015 mmap(0x7c52d718f000, 98304, PROT_READ, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x49000) = 0x7c52d718f000
+90015 mmap(0x7c52d71a7000, 16384, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x60000) = 0x7c52d71a7000
+90015 close(3)                          = 0
+90015 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+90015 read(3, "\177ELF\2\1\1\3\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0\0\0\0\0\0\0\0\0"..., 832) = 832
+90015 newfstatat(3, "", {st_mode=S_IFREG|0644, st_size=940560, ...}, AT_EMPTY_PATH) = 0
+90015 mmap(NULL, 942344, PROT_READ, MAP_PRIVATE|MAP_DENYWRITE, 3, 0) = 0x7c52d705f000
+90015 mmap(0x7c52d706d000, 507904, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0xe000) = 0x7c52d706d000
+90015 mmap(0x7c52d70e9000, 372736, PROT_READ, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x8a000) = 0x7c52d70e9000
+90015 mmap(0x7c52d7144000, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0xe4000) = 0x7c52d7144000
+90015 close(3)                          = 0
+90015 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+90015 read(3, "\177ELF\2\1\1\3\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0P\237\2\0\0\0\0\0"..., 832) = 832
+90015 pread64(3, "\6\0\0\0\4\0\0\0@\0\0\0\0\0\0\0@\0\0\0\0\0\0\0@\0\0\0\0\0\0\0"..., 784, 64) = 784
+90015 pread64(3, "\4\0\0\0 \0\0\0\5\0\0\0GNU\0\2\0\0\300\4\0\0\0\3\0\0\0\0\0\0\0"..., 48, 848) = 48
+90015 pread64(3, "\4\0\0\0\24\0\0\0\3\0\0\0GNU\0\325\31p\226\367\t\200\30)\261\30\257\33|\366c"..., 68, 896) = 68
+90015 newfstatat(3, "", {st_mode=S_IFREG|0755, st_size=2220400, ...}, AT_EMPTY_PATH) = 0
+90015 pread64(3, "\6\0\0\0\4\0\0\0@\0\0\0\0\0\0\0@\0\0\0\0\0\0\0@\0\0\0\0\0\0\0"..., 784, 64) = 784
+90015 mmap(NULL, 2264656, PROT_READ, MAP_PRIVATE|MAP_DENYWRITE, 3, 0) = 0x7c52d6e00000
+90015 mprotect(0x7c52d6e28000, 2023424, PROT_NONE) = 0
+90015 mmap(0x7c52d6e28000, 1658880, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x28000) = 0x7c52d6e28000
+90015 mmap(0x7c52d6fbd000, 360448, PROT_READ, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x1bd000) = 0x7c52d6fbd000
+90015 mmap(0x7c52d7016000, 24576, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x215000) = 0x7c52d7016000
+90015 mmap(0x7c52d701c000, 52816, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS, -1, 0) = 0x7c52d701c000
+90015 close(3)                          = 0
+90015 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libelf.so.1", O_RDONLY|O_CLOEXEC) = 3
+90015 read(3, "\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0\0\0\0\0\0\0\0\0"..., 832) = 832
+90015 newfstatat(3, "", {st_mode=S_IFREG|0644, st_size=117400, ...}, AT_EMPTY_PATH) = 0
+90015 mmap(NULL, 119176, PROT_READ, MAP_PRIVATE|MAP_DENYWRITE, 3, 0) = 0x7c52d7041000
+90015 mprotect(0x7c52d7044000, 102400, PROT_NONE) = 0
+90015 mmap(0x7c52d7044000, 81920, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x3000) = 0x7c52d7044000
+90015 mmap(0x7c52d7058000, 16384, PROT_READ, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x17000) = 0x7c52d7058000
+90015 mmap(0x7c52d705d000, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x1b000) = 0x7c52d705d000
+90015 close(3)                          = 0
+90015 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libz.so.1", O_RDONLY|O_CLOEXEC) = 3
+90015 read(3, "\177ELF\2\1\1\3\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0\0\0\0\0\0\0\0\0"..., 832) = 832
+90015 newfstatat(3, "", {st_mode=S_IFREG|0644, st_size=108936, ...}, AT_EMPTY_PATH) = 0
+90015 mmap(NULL, 110776, PROT_READ, MAP_PRIVATE|MAP_DENYWRITE, 3, 0) = 0x7c52d6de4000
+90015 mprotect(0x7c52d6de6000, 98304, PROT_NONE) = 0
+90015 mmap(0x7c52d6de6000, 69632, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x2000) = 0x7c52d6de6000
+90015 mmap(0x7c52d6df7000, 24576, PROT_READ, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x13000) = 0x7c52d6df7000
+90015 mmap(0x7c52d6dfe000, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x19000) = 0x7c52d6dfe000
+90015 close(3)                          = 0
+90015 mmap(NULL, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7c52d703f000
+90015 mmap(NULL, 12288, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7c52d703c000
+90015 arch_prctl(ARCH_SET_FS, 0x7c52d703c740) = 0
+90015 set_tid_address(0x7c52d703ca10)   = 90015
+90015 set_robust_list(0x7c52d703ca20, 24) = 0
+90015 rseq(0x7c52d703d0e0, 0x20, 0, 0x53053053) = 0
+90015 mprotect(0x7c52d7016000, 16384, PROT_READ) = 0
+90015 mprotect(0x7c52d6dfe000, 4096, PROT_READ) = 0
+90015 mprotect(0x7c52d705d000, 4096, PROT_READ) = 0
+90015 mprotect(0x7c52d7144000, 4096, PROT_READ) = 0
+90015 mprotect(0x7c52d71a7000, 12288, PROT_READ) = 0
+90015 mprotect(0x5d9b66385000, 4096, PROT_READ) = 0
+90015 mprotect(0x7c52d71ee000, 8192, PROT_READ) = 0
+90015 prlimit64(0, RLIMIT_STACK, NULL, {rlim_cur=8192*1024, rlim_max=RLIM64_INFINITY}) = 0
+90015 munmap(0x7c52d71ab000, 34047)     = 0
+90015 rt_sigaction(SIGINT, {sa_handler=0x5d9b6636d1f0, sa_mask=[INT], sa_flags=SA_RESTORER|SA_RESTART, sa_restorer=0x7c52d6e42520}, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+90015 rt_sigaction(SIGTERM, {sa_handler=0x5d9b6636d1f0, sa_mask=[TERM], sa_flags=SA_RESTORER|SA_RESTART, sa_restorer=0x7c52d6e42520}, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+90015 uname({sysname="Linux", nodename="1d1c056e5c834b5db70ca0c5a7f21c57000001", ...}) = 0
+90015 newfstatat(1, "", {st_mode=S_IFCHR|0620, st_rdev=makedev(0x88, 0x2), ...}, AT_EMPTY_PATH) = 0
+90015 getrandom("\x51\x4a\x1f\x9a\x72\x61\x92\x3d", 8, GRND_NONBLOCK) = 8
+90015 brk(NULL)                         = 0x5d9b8f2b1000
+90015 brk(0x5d9b8f2d2000)               = 0x5d9b8f2d2000
+90015 write(1, "Kernel version: 6.8.0\n", 22) = 22
+90015 newfstatat(AT_FDCWD, "/sys/fs/bpf/cpu_throttle", 0x7ffd35a4b780, 0) = -1 EACCES (Permission denied)
+90015 mkdir("/sys/fs/bpf/cpu_throttle", 0700) = -1 EACCES (Permission denied)
+90015 faccessat2(AT_FDCWD, "/proc/version_signature", R_OK, AT_EACCESS) = 0
+90015 openat(AT_FDCWD, "/proc/version_signature", O_RDONLY|O_CLOEXEC) = 3
+90015 newfstatat(3, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+90015 read(3, "Ubuntu 6.8.0-1026.31~22.04.1-azu"..., 1024) = 42
+90015 read(3, "", 1024)                 = 0
+90015 close(3)                          = 0
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 3
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 4
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 5
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 6
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 7
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 8
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 9
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 10
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 11
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 12
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 13
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 14
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 15
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 16
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 17
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 18
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 21
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 23
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 25
+90015 memfd_create("libbpf-placeholder-fd", MFD_CLOEXEC) = 26
+90015 mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0) = 0x7c52d71ed000
+90015 openat(AT_FDCWD, "/sys/fs/bpf", O_RDONLY|O_DIRECTORY) = -1 EACCES (Permission denied)
+90015 bpf(BPF_PROG_LOAD, {prog_type=BPF_PROG_TYPE_SOCKET_FILTER, insn_cnt=2, insns=0x7ffd35a4b3b0, license="GPL", log_level=0, log_size=0, log_buf=NULL, kern_version=KERNEL_VERSION(0, 0, 0), prog_flags=0, prog_name="", prog_ifindex=0, expected_attach_type=BPF_CGROUP_INET_INGRESS, prog_btf_fd=0, func_info_rec_size=0, func_info=NULL, func_info_cnt=0, line_info_rec_size=0, line_info=NULL, line_info_cnt=0, attach_btf_id=0, attach_prog_fd=0}, 116) = -1 EPERM (Operation not permitted)
+90015 prlimit64(0, RLIMIT_MEMLOCK, {rlim_cur=RLIM64_INFINITY, rlim_max=RLIM64_INFINITY}, NULL) = 0
+90015 bpf(BPF_PROG_LOAD, {prog_type=BPF_PROG_TYPE_SOCKET_FILTER, insn_cnt=2, insns=0x7ffd35a4b5d0, license="GPL", log_level=0, log_size=0, log_buf=NULL, kern_version=KERNEL_VERSION(0, 0, 0), prog_flags=0, prog_name="", prog_ifindex=0, expected_attach_type=BPF_CGROUP_INET_INGRESS, prog_btf_fd=0, func_info_rec_size=0, func_info=NULL, func_info_cnt=0, line_info_rec_size=0, line_info=NULL, line_info_cnt=0, attach_btf_id=0, attach_prog_fd=0, fd_array=NULL}, 148) = -1 EPERM (Operation not permitted)
+90015 bpf(BPF_PROG_LOAD, {prog_type=BPF_PROG_TYPE_TRACEPOINT, insn_cnt=2, insns=0x7ffd35a4b5d0, license="GPL", log_level=0, log_size=0, log_buf=NULL, kern_version=KERNEL_VERSION(0, 0, 0), prog_flags=0, prog_name="", prog_ifindex=0, expected_attach_type=BPF_CGROUP_INET_INGRESS, prog_btf_fd=0, func_info_rec_size=0, func_info=NULL, func_info_cnt=0, line_info_rec_size=0, line_info=NULL, line_info_cnt=0, attach_btf_id=0, attach_prog_fd=0, fd_array=NULL}, 148) = -1 EPERM (Operation not permitted)
+90015 write(2, "libbpf: Error in bpf_object__pro"..., 221) = 221
+90015 close(3)                          = 0
+90015 close(4)                          = 0
+90015 close(5)                          = 0
+90015 close(6)                          = 0
+90015 close(7)                          = 0
+90015 close(8)                          = 0
+90015 close(9)                          = 0
+90015 close(10)                         = 0
+90015 close(11)                         = 0
+90015 close(12)                         = 0
+90015 close(13)                         = 0
+90015 close(14)                         = 0
+90015 close(15)                         = 0
+90015 close(16)                         = 0
+90015 close(17)                         = 0
+90015 close(18)                         = 0
+90015 close(21)                         = 0
+90015 close(23)                         = 0
+90015 close(25)                         = 0
+90015 close(26)                         = 0
+90015 write(2, "libbpf: failed to load object 'c"..., 49) = 49
+90015 write(2, "libbpf: failed to load BPF skele"..., 59) = 59
+90015 write(2, "Kh\303\264ng th\341\273\203 load BPF skeleton: "..., 35) = 35
+90015 statfs("/sys/fs/bpf/cpu_throttle", 0x7ffd35a4a520) = -1 EACCES (Permission denied)
+90015 write(2, "libbpf: failed to statfs /sys/fs"..., 69) = 69
+90015 munmap(0x7c52d71ed000, 4096)      = 0
+90015 write(1, "\304\220\303\243 d\341\273\215n d\341\272\271p xong. Th\341\273\235i gi"..., 52) = 52
+90015 exit_group(1)                     = ?
+90015 +++ exited with 1 +++
