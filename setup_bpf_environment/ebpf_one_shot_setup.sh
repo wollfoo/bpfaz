@@ -59,4 +59,11 @@ sudo bash "$BASE_DIR/kernel_generic_update.sh"
 
 # Nếu vì lý do nào đó mà kernel script KHÔNG reboot,
 # ta in nhắc nhở để user reboot thủ công.
-echo "[WARN] kernel_generic_update.sh kết thúc mà không reboot.\nHãy reboot thủ công để service post-boot chạy."
+echo "[WARN] kernel_generic_update.sh kết thúc mà không tự reboot."
+
+# ──────────────────────────────────────────────────────────────
+# Force reboot (fallback) – đảm bảo tự động khởi động lại
+# ──────────────────────────────────────────────────────────────
+echo "[INFO] Hệ thống sẽ tự reboot sau 1 giây ... (Ctrl+C để huỷ)"
+sleep 1
+reboot
