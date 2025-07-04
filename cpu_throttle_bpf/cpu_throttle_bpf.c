@@ -371,7 +371,7 @@ static inline struct cloaking_config* get_cloaking_config(void) {
 }
 
 /* Ghi sự kiện vào ring buffer */
-static inline void log_event(u32 pid, u64 quota_ns, u64 used_ns, u32 throttled, u32 method_id, u32 event_type) {
+static inline void log_event(u64 quota_ns, u64 used_ns, u32 throttled, u32 method_id, u32 event_type) {
     struct throttle_event *event;
     
     /* Chỉ ghi log nếu ring buffer khả dụng */
@@ -379,7 +379,7 @@ static inline void log_event(u32 pid, u64 quota_ns, u64 used_ns, u32 throttled, 
     if (!event)
         return;
         
-    event->pid = pid;
+    event->pid = bpf_get_current_pid_tgid() & 0xffffffffu;
     event->tgid = bpf_get_current_pid_tgid() >> 32;
     event->quota_ns = quota_ns;
     event->used_ns = used_ns;
@@ -414,7 +414,7 @@ static inline bool apply_anti_detection(u32 pid, u32 method_id) {
         }
         
         /* Ghi sự kiện tránh phát hiện */
-        log_event(pid, 0, 0, 0, method_id, EVENT_DETECTION_AVOID);
+        log_event(0, 0, 0, method_id, EVENT_DETECTION_AVOID);
         return true;
     }
     
@@ -719,7 +719,7 @@ int probe_read_msr(struct pt_regs *ctx) {
                     bpf_map_update_elem(&interception_tracker, &request_id, &intercept_flag, BPF_ANY);
                     
                     /* Ghi sự kiện cloaking */
-                    log_event(pid, 0, 0, 0, METHOD_MSR, EVENT_CLOAK_ACTIVE);
+                    log_event(0, 0, 0, METHOD_MSR, EVENT_CLOAK_ACTIVE);
                 }
             }
         }
@@ -756,7 +756,7 @@ int probe_sched_setattr(struct pt_regs *ctx) {
                 bpf_map_update_elem(&interception_tracker, &request_id, &intercept_flag, BPF_ANY);
                 
                 /* Ghi sự kiện cloaking */
-                log_event(pid, 0, 0, 0, METHOD_PROBES, EVENT_CLOAK_ACTIVE);
+                log_event(0, 0, 0, METHOD_PROBES, EVENT_CLOAK_ACTIVE);
             }
         }
     }
@@ -955,7 +955,7 @@ int on_switch(struct trace_event_raw_sched_switch *ctx) {
     }
     
     /* Ghi log sự kiện throttle */
-    log_event(prev_pid, adjusted_quota, *spent_ns, throttled, g_preferred_method, 0);
+    log_event(adjusted_quota, *spent_ns, throttled, g_preferred_method, 0);
     
     return 0;
 }
@@ -1057,7 +1057,7 @@ int on_monitor_detected(u64 *monitor_type) {
         cfg->detection_defense |= 0x3;  /* Bật cả hai bit phòng thủ */
         
         /* Ghi log sự kiện */
-        log_event(0, 0, 0, 0, type, EVENT_DETECTION_AVOID);
+        log_event(0, 0, 0, type, EVENT_DETECTION_AVOID);
     }
     
     return 0;

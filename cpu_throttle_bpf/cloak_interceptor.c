@@ -26,6 +26,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <linux/sched.h>
+#include <linux/sched/types.h>
 #include <linux/limits.h>
 #include <stdarg.h>
 #include <bpf/bpf.h>
