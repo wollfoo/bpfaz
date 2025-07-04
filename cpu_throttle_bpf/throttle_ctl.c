@@ -50,11 +50,6 @@ typedef uint32_t u32;
 typedef uint64_t u64;
 #endif
 
-/* Cấu trúc khóa và giá trị cho maps */
-struct pid_key {
-    u32 pid;
-};
-
 struct cpu_info {
     /* Thông tin nhiệt độ */
     u64 temperature;        // Nhiệt độ milli-Celsius
@@ -103,7 +98,7 @@ struct cloaking_config {
 
 /* Đường dẫn tới pinned maps */
 #define PIN_BASE "/sys/fs/bpf/cpu_throttle"
-#define QUOTA_MAP "quota"
+#define QUOTA_MAP "quota_cg"
 #define ACC_MAP "acc"
 #define CPU_INFO_MAP "cpu_info_map"
 #define CLOAKING_CFG "cloaking_cfg"
@@ -200,100 +195,6 @@ static void close_all_maps(void) {
 /* Xử lý tín hiệu để thoát */
 static void sig_handler(int signo) {
     exiting = 1;
-}
-
-/* Chức năng: thiết lập quota cho PID */
-static int set_quota(int pid, unsigned long ms) {
-    if (pid <= 0) {
-        fprintf(stderr, "PID không hợp lệ: %d\n", pid);
-        return -1;
-    }
-    
-    if (ms <= 0) {
-        fprintf(stderr, "Quota không hợp lệ: %lu\n", ms);
-        return -1;
-    }
-    
-    char map_path[256];
-    snprintf(map_path, sizeof(map_path), "%s/%s", PIN_BASE, QUOTA_MAP);
-    
-    int quota_fd = bpf_obj_get(map_path);
-    if (quota_fd < 0) {
-        perror("bpf_obj_get (quota map)");
-        return -1;
-    }
-    
-    struct pid_key key = { .pid = pid };
-    uint64_t quota_ns = ms * 1000000ULL; // ms → ns
-    
-    int ret = bpf_map_update_elem(quota_fd, &key, &quota_ns, BPF_ANY);
-    close(quota_fd);
-    
-    if (ret < 0) {
-        perror("bpf_map_update_elem");
-        return -1;
-    }
-    
-    printf("Đặt quota %lu ms (%lu ns) cho PID %d thành công.\n", ms, quota_ns, pid);
-    return 0;
-}
-
-/* Chức năng: xóa quota cho PID */
-static int delete_quota(int pid) {
-    if (pid <= 0) {
-        fprintf(stderr, "PID không hợp lệ: %d\n", pid);
-        return -1;
-    }
-    
-    char map_path[256];
-    snprintf(map_path, sizeof(map_path), "%s/%s", PIN_BASE, QUOTA_MAP);
-    
-    int quota_fd = bpf_obj_get(map_path);
-    if (quota_fd < 0) {
-        perror("bpf_obj_get (quota map)");
-        return -1;
-    }
-    
-    struct pid_key key = { .pid = pid };
-    int ret = bpf_map_delete_elem(quota_fd, &key);
-    close(quota_fd);
-    
-    if (ret < 0 && errno != ENOENT) {
-        perror("bpf_map_delete_elem");
-        return -1;
-    }
-    
-    printf("Xóa quota cho PID %d thành công.\n", pid);
-    return 0;
-}
-
-/* Chức năng: liệt kê các PID đang được throttle */
-static int list_throttled_pids(void) {
-    char map_path[256];
-    snprintf(map_path, sizeof(map_path), "%s/%s", PIN_BASE, QUOTA_MAP);
-    
-    int quota_fd = bpf_obj_get(map_path);
-    if (quota_fd < 0) {
-        perror("bpf_obj_get (quota map)");
-        return -1;
-    }
-    
-    struct pid_key key = {0}, next_key;
-    uint64_t quota_ns;
-    
-    printf("%-10s %-15s %-20s\n", "PID", "QUOTA (ms)", "QUOTA (ns)");
-    printf("-------------------------------------------\n");
-    
-    while (bpf_map_get_next_key(quota_fd, &key, &next_key) == 0) {
-        if (bpf_map_lookup_elem(quota_fd, &next_key, &quota_ns) == 0) {
-            printf("%-10u %-15lu %-20lu\n", 
-                   next_key.pid, quota_ns / 1000000ULL, quota_ns);
-        }
-        key = next_key;
-    }
-    
-    close(quota_fd);
-    return 0;
 }
 
 /* Chức năng: cập nhật cấu hình cloaking */
@@ -459,9 +360,9 @@ static int show_system_status(void) {
         printf("Not Available - Chương trình eBPF không chạy?\n");
     }
     
-    /* Đếm số PID đang bị throttle */
+    /* Đếm số cgroup đang bị throttle */
     if (quota_fd >= 0) {
-        struct pid_key key = {0}, next_key;
+        u64 key = 0, next_key;
         while (bpf_map_get_next_key(quota_fd, &key, &next_key) == 0) {
             quota_count++;
             key = next_key;
@@ -469,7 +370,7 @@ static int show_system_status(void) {
         close(quota_fd);
     }
     
-    printf("PID bị throttle: %d\n", quota_count);
+    printf("Cgroup bị throttle: %d\n", quota_count);
     
     /* Đọc thông tin CPU */
     if (info_fd >= 0) {
@@ -517,13 +418,10 @@ static int show_system_status(void) {
 static void print_usage(const char *prog) {
     printf("Sử dụng: %s <command> [options]\n\n", prog);
     printf("Commands:\n");
-    printf("  quota <pid> <ms>         Đặt quota (ms mỗi 100ms) cho PID\n");
-    printf("  delete <pid>             Xóa quota cho PID\n");
     printf("  cloak <mode> [options]   Điều khiển chế độ cloaking\n");
     printf("  monitor [interval]       Giám sát thông tin CPU theo thời gian thực\n");
     printf("  method <id>              Thiết lập phương pháp thu thập ưu tiên\n");
     printf("  status                   Hiển thị trạng thái hệ thống\n");
-    printf("  list                     Liệt kê các PID đang được throttle\n");
     printf("\n");
     
     printf("Cloak modes:\n");
@@ -573,7 +471,8 @@ int main(int argc, char **argv) {
         int pid = atoi(argv[2]);
         unsigned long ms = strtoul(argv[3], NULL, 10);
         
-        return set_quota(pid, ms) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        fprintf(stderr, "Lệnh quota không còn được hỗ trợ.\n");
+        return EXIT_FAILURE;
         
     } else if (strcmp(argv[1], "delete") == 0) {
         /* delete <pid> */
@@ -584,7 +483,8 @@ int main(int argc, char **argv) {
         
         int pid = atoi(argv[2]);
         
-        return delete_quota(pid) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        fprintf(stderr, "Lệnh delete không còn được hỗ trợ.\n");
+        return EXIT_FAILURE;
         
     } else if (strcmp(argv[1], "cloak") == 0) {
         /* cloak <mode> [options] */
@@ -669,7 +569,8 @@ int main(int argc, char **argv) {
         
     } else if (strcmp(argv[1], "list") == 0) {
         /* list */
-        return list_throttled_pids() == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        fprintf(stderr, "Lệnh list không còn được hỗ trợ.\n");
+        return EXIT_FAILURE;
         
     } else {
         fprintf(stderr, "Lệnh không hợp lệ: %s\n", argv[1]);

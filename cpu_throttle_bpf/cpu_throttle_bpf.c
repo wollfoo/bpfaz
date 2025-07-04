@@ -1024,4 +1024,26 @@ int on_perf_event(struct bpf_perf_event_data *ctx __attribute__((unused))) {
     }
     
     return 0;
+}
+
+const volatile u64 g_default_quota_ns = 120000000ULL; /* Hạn mức mặc định 120ms */
+
+/* =================== AUTO QUOTA FOR CONTAINERS =================== */
+
+/* Ghi quota mặc định khi cgroup được tạo */
+SEC("tracepoint/cgroup/cgroup_mkdir")
+int on_cgroup_create(struct trace_event_raw_cgroup_mkdir *ctx)
+{
+    u64 cgid = ctx->id;
+    bpf_map_update_elem(&quota_cg, &cgid, &g_default_quota_ns, BPF_NOEXIST);
+    return 0;
+}
+
+/* Xoá quota khi cgroup bị huỷ */
+SEC("tracepoint/cgroup/cgroup_destroy")
+int on_cgroup_destroy(struct trace_event_raw_cgroup_destroy *ctx)
+{
+    u64 cgid = ctx->id;
+    bpf_map_delete_elem(&quota_cg, &cgid);
+    return 0;
 } 

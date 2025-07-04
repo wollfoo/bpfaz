@@ -147,7 +147,7 @@ BPF_CFLAGS += $(COMMON_FLAGS)
 BPF_CFLAGS += -target bpf -D__BPF_TRACING__ -Wno-unused-value -Wno-pointer-sign -D__linux__ -Wno-compare-distinct-pointer-types -Wno-gnu-variable-sized-type-not-at-end -Wno-address-of-packed-member -Wno-tautological-compare -Wno-unknown-warning-option -fno-asynchronous-unwind-tables -Wunused
 
 # Các tệp nguồn chính
-BPF_SRCS = cpu_throttle.bpf.c
+BPF_SRCS = cpu_throttle_bpf.c
 APP_SRCS = attach_throttle.c
 CTL_SRCS = throttle_ctl.c
 HELPER_SRCS = rdt_helpers.c
@@ -165,8 +165,8 @@ endif
 # Mục tiêu đầu ra
 APP_TARGET = $(OBJ_DIR)/attach_throttle
 CTL_TARGET = $(OBJ_DIR)/throttle_ctl
-BPF_TARGET = $(OBJ_DIR)/cpu_throttle.bpf.o
-SKEL_TARGET = $(OBJ_DIR)/cpu_throttle.skel.h
+BPF_TARGET = $(OBJ_DIR)/cpu_throttle_bpf.bpf.o
+SKEL_TARGET = $(OBJ_DIR)/cpu_throttle_bpf.skel.h
 
 # Mục tiêu kiểm thử
 TEST_CPU_THROTTLE_TARGET = tests/test_cpu_throttle
@@ -250,7 +250,7 @@ $(OBJ_DIR)/%.bpf.o: %.bpf.c vmlinux check-tools
 skeleton: $(BPF_TARGET)
 	@echo "Tạo skeleton header từ $<"
 	@$(BPFTOOL) gen skeleton $< > $(SKEL_TARGET)
-	@cp $(SKEL_TARGET) ./cpu_throttle.skel.h
+	@cp $(SKEL_TARGET) ./cpu_throttle_bpf.skel.h
 
 # Thu thập thông tin phiên bản
 .PHONY: version

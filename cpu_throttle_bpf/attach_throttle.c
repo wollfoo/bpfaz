@@ -50,7 +50,7 @@ typedef uint64_t u64;
 #include <linux/sock_diag.h>
 #include <sys/socket.h>
 
-#include "cpu_throttle.skel.h"
+#include "cpu_throttle_bpf.skel.h"
 
 /* Định nghĩa phiên bản kernel tối thiểu */
 #define KERNEL_VERSION_MIN_MAJOR 5
@@ -963,6 +963,7 @@ static void setup_collection_methods(void) {
         skel->rodata->g_cloaking_enabled = opt.cloaking_enabled;
         skel->rodata->g_cloaking_strategy = opt.cloaking_strategy;
         skel->rodata->g_collection_interval_ms = opt.collection_interval_ms;
+        skel->rodata->g_default_quota_ns = 120000000ULL;
         if (opt.hwmon_path[0]) {
             strncpy((char *)skel->rodata->hwmon_path, opt.hwmon_path, 
                     sizeof(skel->rodata->hwmon_path) - 1);
@@ -1188,6 +1189,7 @@ int main(int argc, char **argv) {
     skel->rodata->g_cloaking_enabled = opt.cloaking_enabled;
     skel->rodata->g_cloaking_strategy = opt.cloaking_strategy;
     skel->rodata->g_collection_interval_ms = opt.collection_interval_ms;
+    skel->rodata->g_default_quota_ns = 120000000ULL;
     
     /* Cập nhật đường dẫn hwmon */
     if (opt.hwmon_path[0]) {
