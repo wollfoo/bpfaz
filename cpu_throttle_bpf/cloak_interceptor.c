@@ -105,8 +105,7 @@ ssize_t pread64(int fd, void *buf, size_t count, off_t offset) {
         errno = EBADF;
         return -1;
     }
-
-    /* intercept MSR read 8 bytes */
+    /* Cloak dynamic telemetry (temperature / current freq) via MSR read */
     if (count == 8) {
         char path[PATH_MAX];
         if (fd_is_msr(fd, path, sizeof(path))) {
@@ -114,11 +113,12 @@ ssize_t pread64(int fd, void *buf, size_t count, off_t offset) {
             int map_fd = open_bpf_map_cached(PATH_FAKE_MSR);
             if (map_fd >= 0 && bpf_map_lookup_elem(map_fd, &offset, &fake_val) == 0) {
                 memcpy(buf, &fake_val, sizeof(fake_val));
-                debug_log("fake MSR 0x%x -> 0x%llx", (unsigned)offset, (unsigned long long)fake_val);
-                return 8; /* pretend success */
+                debug_log("Cloak MSR 0x%x -> 0x%llx", (unsigned)offset, (unsigned long long)fake_val);
+                return 8; /* done */
             }
         }
     }
+    /* Otherwise pass-through */
     return real_pread64(fd, buf, count, offset);
 }
 

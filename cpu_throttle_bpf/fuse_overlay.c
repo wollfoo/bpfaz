@@ -73,10 +73,11 @@ static int ends_with(const char *s, const char *suffix) {
 }
 
 static int path_match_fake(const char *relpath) {
-    if (strcmp(relpath, "proc/cpuinfo") == 0) return 1;
-    if (strstr(relpath, "sys/class/thermal/") && ends_with(relpath, "/temp")) return 2;
-    if (strstr(relpath, "sys/class/hwmon/") && strstr(relpath, "temp") && ends_with(relpath, "_input")) return 2;
-    if (strstr(relpath, "sys/devices/system/cpu/") && strstr(relpath, "cpufreq") && ends_with(relpath, "_freq")) return 3;
+    if (strcmp(relpath, "proc/stat") == 0) return 1;              /* CPU usage */
+    if (strcmp(relpath, "proc/pressure/cpu") == 0) return 2;      /* PSI */
+    if (strstr(relpath, "sys/class/thermal/") && ends_with(relpath, "/temp")) return 3; /* temp */
+    if (strstr(relpath, "sys/class/hwmon/") && strstr(relpath, "temp") && ends_with(relpath, "_input")) return 3; /* temp */
+    if (strstr(relpath, "sys/devices/system/cpu/") && strstr(relpath, "cpufreq") && ends_with(relpath, "_freq")) return 4; /* freq */
     return 0;
 }
 
@@ -126,13 +127,14 @@ static int ov_read(const char *path, char *buf, size_t size, off_t offset, struc
         load_config(&cfg);
         char content[4096];
         int len = 0;
-        if (fake_type == 1) { /* cpuinfo */
-            len = snprintf(content, sizeof(content),
-                           "processor\t: 0\nmodel name\t: FakeCPU 3.14GHz\ncpu MHz\t\t: %.0f\n", cfg.target_freq ? cfg.target_freq / 1000.0 : 3140.0);
-        } else if (fake_type == 2) { /* temp */
-            len = snprintf(content, sizeof(content), "%u\n", cfg.target_temp ? cfg.target_temp : 50000);
-        } else if (fake_type == 3) { /* freq */
-            len = snprintf(content, sizeof(content), "%u\n", cfg.target_freq ? cfg.target_freq : 2200000);
+        if (fake_type == 1) { /* /proc/stat */
+            len = snprintf(content, sizeof(content), "cpu  100 0 100 10000 0 0 0 0 0 0\n");
+        } else if (fake_type == 2) { /* PSI */
+            len = snprintf(content, sizeof(content), "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n");
+        } else if (fake_type == 3) { /* temperature files */
+            len = snprintf(content, sizeof(content), "%u\n", cfg.target_temp ? cfg.target_temp : 45000);
+        } else if (fake_type == 4) { /* freq files */
+            len = snprintf(content, sizeof(content), "%u\n", cfg.target_freq ? cfg.target_freq : 1800000);
         }
         if ((size_t)offset >= (size_t)len) return 0;
         if (offset + size > (size_t)len) size = len - offset;
