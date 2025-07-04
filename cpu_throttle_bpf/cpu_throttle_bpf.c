@@ -260,6 +260,14 @@ struct {
     __type(value, u32);   /* Interception status */
 } interception_tracker SEC(".maps");
 
+/* Map cấu hình bật/tắt FUSE overlay theo mount namespace */
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, u32);
+    __type(value, u32);   /* 0 = off, 1 = on */
+} fuse_cfg SEC(".maps");
+
 /* ----------------- ENUM VÀ CONSTANTS ----------------- */
 
 /* Enum các phương pháp thu thập */

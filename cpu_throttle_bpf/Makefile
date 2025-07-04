@@ -162,7 +162,8 @@ APP_TARGET = $(OBJ_DIR)/attach_throttle
 CTL_TARGET = $(OBJ_DIR)/throttle_ctl
 BPF_TARGET = $(OBJ_DIR)/cpu_throttle_bpf.o
 SKEL_TARGET = $(OBJ_DIR)/cpu_throttle_bpf.skel.h
-INTERCEPTOR_TARGET = $(OBJ_DIR)/libcloaking_interceptor.so
+INTERCEPTOR_SRC = cloak_interceptor.c
+INTERCEPTOR_TARGET = $(OBJ_DIR)/libcloak.so
 
 # Mục tiêu kiểm thử
 TEST_CPU_THROTTLE_TARGET = tests/test_cpu_throttle
@@ -174,7 +175,7 @@ LIBS = -lelf -lz -lbpf -lpthread -lm $(RDT_LIBS) $(SECCOMP_LIBS)
 
 # Mục tiêu chính
 .PHONY: all
-all: $(APP_TARGET) $(CTL_TARGET) $(INTERCEPTOR_TARGET)
+all: $(APP_TARGET) $(CTL_TARGET) $(INTERCEPTOR_TARGET) $(FUSE_TARGET)
 
 # Kiểm tra các phụ thuộc
 .PHONY: check-deps
@@ -341,10 +342,17 @@ info:
 	@echo "  MSR: $(HAS_MSR)"
 	@echo "  Seccomp: $(HAS_SECCOMP)"
 
-# Enhanced Cloaking Interceptor - Shared Library
-$(INTERCEPTOR_TARGET): enhanced_cloaking_interceptor.c
-	@mkdir -p $(dir $@)
-	@echo "Biên dịch Enhanced Cloaking Interceptor"
-	@$(CC) $(CFLAGS) -shared -fPIC -ldl -lpthread -lbpf \
-		-o $@ $< $(LIBS)
-	@echo "✅ Interceptor shared library: $@"
+# Rule build interceptor
+$(INTERCEPTOR_TARGET): $(INTERCEPTOR_SRC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -shared -fPIC -ldl -lpthread -lbpf -o $@ $<
+	@echo "Built interceptor $@"
+
+# Build FUSE daemon
+FUSE_TARGET = $(OBJ_DIR)/fuse_overlay
+FUSE_SRC = fuse_overlay.c
+
+$(FUSE_TARGET): $(FUSE_SRC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -O2 -pthread -o $@ $< `pkg-config fuse3 --cflags --libs` -lbpf
+	@echo "Built FUSE daemon $@"
