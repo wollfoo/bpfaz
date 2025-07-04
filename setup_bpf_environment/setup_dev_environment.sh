@@ -550,6 +550,7 @@ install_dev_packages() {
         "pkg-config"
         "git"
         "cmake"
+        "libfuse3-dev"
         "linux-headers-$(uname -r)"
         "linux-libc-dev"
     )
