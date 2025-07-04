@@ -94,7 +94,7 @@ Usage: $0 [OPTIONS]
 Setup complete eBPF development environment for hide_process_bpf module.
 
 OPTIONS:
-    -v, --verbose           Enable verbose output
+    -v, --verbose          Enable verbose output
     -d, --dry-run          Show what would be done without executing
     -f, --force            Force installation even if components exist
     -s, --skip-backup      Skip creating backup (faster but less safe)

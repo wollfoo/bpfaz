@@ -60,4 +60,4 @@ EOF
 update-grub                                   # chạy lần cuối, không -q
 echo "==> Rebooting vào kernel $KVER_FULL ..."
 sleep 2
-reboot
+reboot 
