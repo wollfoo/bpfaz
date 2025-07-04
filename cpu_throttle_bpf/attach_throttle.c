@@ -960,25 +960,7 @@ static void setup_collection_methods(void) {
     
     if (opt.verbose) printf("active_methods mask=0x%x\n", active_methods);
     
-    /* Cập nhật vào rodata */
-    if (opt.verbose) {
-        printf("skel->rodata ptr=%p\n", (void*)skel->rodata);
-    }
-    if (skel->rodata) {
-        skel->rodata->g_active_methods = active_methods;
-        skel->rodata->g_preferred_method = opt.preferred_method;
-        skel->rodata->g_enable_psi = opt.use_psi;
-        skel->rodata->g_enable_ipc = opt.use_perf;
-        skel->rodata->g_enable_hfi = opt.use_msr;
-        skel->rodata->g_cloaking_enabled = opt.cloaking_enabled;
-        skel->rodata->g_cloaking_strategy = opt.cloaking_strategy;
-        skel->rodata->g_collection_interval_ms = opt.collection_interval_ms;
-        skel->rodata->g_default_quota_ns = 120000000ULL;
-        if (opt.hwmon_path[0]) {
-            strncpy((char *)skel->rodata->hwmon_path, opt.hwmon_path, 
-                    sizeof(skel->rodata->hwmon_path) - 1);
-        }
-    }
+    /* Không ghi vào skel->rodata sau khi BPF đã load (tránh segfault do vùng RO) */
     
     if (opt.verbose) printf("setup_collection_methods: active_methods=0x%x\n", active_methods);
 }
