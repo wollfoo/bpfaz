@@ -150,17 +150,12 @@ BPF_CFLAGS += -target bpf -D__BPF_TRACING__ -Wno-unused-value -Wno-pointer-sign 
 BPF_SRCS = cpu_throttle_bpf.c
 APP_SRCS = attach_throttle.c
 CTL_SRCS = throttle_ctl.c
-HELPER_SRCS = rdt_helpers.c
+HELPER_SRCS =
 
 # Các tệp kiểm thử mới
 TEST_CPU_THROTTLE = cpu_throttle_bpf/tests/test_cpu_throttle.c
 TEST_CLOAKING = cpu_throttle_bpf/tests/test_cloaking.c
 TEST_SRCS = $(TEST_CPU_THROTTLE) $(TEST_CLOAKING)
-
-# Thêm rdt_helpers.c nếu WITH_RDT=1
-ifeq ($(WITH_RDT),1)
-    APP_SRCS += rdt_helpers.c
-endif
 
 # Mục tiêu đầu ra
 APP_TARGET = $(OBJ_DIR)/attach_throttle
@@ -193,8 +188,6 @@ check-deps:
 .PHONY: prepare
 prepare:
 	@mkdir -p $(OBJ_DIR) $(BUILD_DIR) $(CACHE_DIR) $(TEST_DIR)
-	@[ -f rdt_helpers.c ] || touch rdt_helpers.c
-	@[ -f rdt_helpers.h ] || touch rdt_helpers.h
 
 # Tạo vmlinux.h nếu chưa có
 .PHONY: vmlinux
@@ -285,38 +278,6 @@ ctl: $(BPF_TARGET) skeleton version
 check: $(BPF_TARGET)
 	@echo "Kiểm tra mã nguồn BPF"
 	@$(BPFTOOL) prog dump xlated file $(BPF_TARGET) 2>&1 | grep "invalid\|error" && echo "Có lỗi trong mã BPF" || echo "Mã BPF hợp lệ"
-
-# Tạo tệp hỗ trợ thư viện nếu chưa tồn tại
-rdt_helpers.c:
-	@echo "// Các hàm hỗ trợ Intel RDT" > $@
-	@echo "#ifdef HAS_RDT" >> $@
-	@echo "#include \"rdt_helpers.h\"" >> $@
-	@echo "#include <pqos.h>" >> $@
-	@echo "#include <stdlib.h>" >> $@
-	@echo "#include <stdio.h>" >> $@
-	@echo "" >> $@
-	@echo "int setup_rdt(void) {" >> $@
-	@echo "    struct pqos_config cfg;" >> $@
-	@echo "    int ret;" >> $@
-	@echo "    memset(&cfg, 0, sizeof(cfg));" >> $@
-	@echo "    cfg.fd_log = STDOUT_FILENO;" >> $@
-	@echo "    cfg.verbose = 0;" >> $@
-	@echo "    ret = pqos_init(&cfg);" >> $@
-	@echo "    return ret == PQOS_RETVAL_OK ? 0 : -1;" >> $@
-	@echo "}" >> $@
-	@echo "#endif" >> $@
-
-rdt_helpers.h:
-	@echo "#ifndef RDT_HELPERS_H" > $@
-	@echo "#define RDT_HELPERS_H" >> $@
-	@echo "" >> $@
-	@echo "#ifdef HAS_RDT" >> $@
-	@echo "int setup_rdt(void);" >> $@
-	@echo "#else" >> $@
-	@echo "static inline int setup_rdt(void) { return -1; }" >> $@
-	@echo "#endif" >> $@
-	@echo "" >> $@
-	@echo "#endif /* RDT_HELPERS_H */" >> $@
 
 # Tạo tài liệu API
 .PHONY: docs
