@@ -454,6 +454,9 @@ static void print_usage(const char *prog) {
 }
 
 int main(int argc, char **argv) {
+    /* Line-buffered stdout để xuất log tức thì */
+    setvbuf(stdout, NULL, _IOLBF, 0);
+    
     /* Kiểm tra tham số dòng lệnh */
     if (argc < 2) {
         print_usage(argv[0]);

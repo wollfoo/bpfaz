@@ -32,11 +32,6 @@ char LICENSE[] SEC("license") = "GPL";
 
 /* ----------------- CẤU TRÚC DỮ LIỆU CHÍNH ----------------- */
 
-struct pid_key {
-    u32 pid;
-    u32 tgid;    /* Process Group ID - thêm để phân biệt tiến trình cha */
-};
-
 /* Cấu trúc lưu trữ thông tin CPU toàn diện */
 struct cpu_info {
     /* Thông tin cơ bản */

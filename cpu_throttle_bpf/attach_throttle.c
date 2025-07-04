@@ -60,7 +60,7 @@ typedef uint64_t u64;
 /* Pin paths */
 #define PIN_BASEDIR "/sys/fs/bpf/cpu_throttle"
 #define PIN_MAP_ACC PIN_BASEDIR "/acc"
-#define PIN_MAP_QUOTA PIN_BASEDIR "/quota"
+#define PIN_MAP_QUOTA PIN_BASEDIR "/quota_cg"
 #define PIN_LINK PIN_BASEDIR "/link"
 
 /* Enum các phương pháp thu thập */
@@ -1131,6 +1131,9 @@ int main(int argc, char **argv) {
     char pin_path[256];
     time_t start_time;
     bool skip_btf = false;
+    
+    /* Bật line-buffered stdout để tránh trễ khi printf */
+    setvbuf(stdout, NULL, _IOLBF, 0);
     
     /* Xử lý tham số dòng lệnh */
     parse_args(argc, argv);
