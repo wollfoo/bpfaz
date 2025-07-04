@@ -216,6 +216,50 @@ struct {
     __type(value, struct psi_data);
 } psi_map SEC(".maps");
 
+/* =====================================================
+ *  ENHANCED CLOAKING MAPS - Thay thế bpf_probe_write_user
+ * ===================================================== */
+
+/* Map lưu fake MSR values */
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 256);
+    __type(key, u32);     /* MSR address */
+    __type(value, u64);   /* Fake MSR value */
+} fake_msr_map SEC(".maps");
+
+/* Map lưu fake scheduler attributes */
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 1024);
+    __type(key, u32);     /* PID */
+    __type(value, u32);   /* Fake util_clamp_max */
+} fake_sched_attr_map SEC(".maps");
+
+/* Map lưu fake RDT counters */
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 512);
+    __type(key, u64);     /* Counter address hash */
+    __type(value, u64);   /* Fake counter value */
+} fake_rdt_map SEC(".maps");
+
+/* Map lưu fake RAPL energy values */
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 128);
+    __type(key, u64);     /* Energy register address */
+    __type(value, u64);   /* Fake energy value */
+} fake_rapl_map SEC(".maps");
+
+/* Map tracking interception requests */
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 2048);
+    __type(key, u64);     /* Request ID (PID + syscall + timestamp) */
+    __type(value, u32);   /* Interception status */
+} interception_tracker SEC(".maps");
+
 /* ----------------- ENUM VÀ CONSTANTS ----------------- */
 
 /* Enum các phương pháp thu thập */
@@ -612,62 +656,63 @@ int on_psi_cpu(void *ctx __attribute__((unused))) {
     return 0;
 }
 
-/* 2. MSR Direct Access via Kprobe - tương thích kernel 6.8 */
-SEC("kprobe/native_read_msr")
+/* 2. MSR (Model Specific Registers) via kprobe - tương thích kernel 6.8 */
+SEC("kprobe/rdmsr")
 int probe_read_msr(struct pt_regs *ctx) {
     if (!(g_active_methods & (1 << METHOD_MSR)))
         return 0;
-        
+    
+    /* Lấy địa chỉ MSR từ tham số - kernel 6.8 hỗ trợ bpf_probe_read_kernel */
     u32 msr_addr;
     u64 *msr_val;
-    
-    /* Lấy tham số từ context - kernel 6.8 hỗ trợ bpf_probe_read_kernel */
     bpf_probe_read_kernel(&msr_addr, sizeof(msr_addr), (void *)PT_REGS_PARM1(ctx));
     bpf_probe_read_kernel(&msr_val, sizeof(msr_val), (void *)PT_REGS_PARM2(ctx));
-
-    /* Đọc giá trị MSR thật */
-    u64 val = 0;
-    bpf_probe_read_kernel(&val, sizeof(val), msr_val);
     
-    /* Lưu vào cache */
-    bpf_map_update_elem(&msr_cache, &msr_addr, &val, BPF_ANY);
-    
-    /* Áp dụng cloaking nếu được yêu cầu */
-    if (g_cloaking_enabled) {
-        struct cloaking_config *cfg = get_cloaking_config();
-        if (cfg && cfg->enabled) {
-            u64 fake_val = val;
-            bool modified = false;
-            
-            /* Giả mạo MSR nhiệt độ */
-            if (msr_addr == MSR_IA32_THERM_STATUS) {
-                u64 fake_temp = cfg->target_temp;
-                if (!fake_temp) fake_temp = 45000;  /* Mặc định 45°C */
+    /* Cache MSR trong map để theo dõi access pattern */
+    u64 timestamp = bpf_ktime_get_ns();
+    if (bpf_map_update_elem(&msr_cache, &msr_addr, &timestamp, BPF_ANY) == 0) {
+        /* Áp dụng cloaking để che giấu thông tin */
+        if (g_cloaking_enabled) {
+            struct cloaking_config *cfg = get_cloaking_config();
+            if (cfg && cfg->enabled && cfg->strategy != CLOAK_NONE) {
+                u64 real_val;
+                u64 fake_val;
                 
-                /* Tính Digital Thermal Sensor (DTS) */
-                u32 target_dts = (100000 - fake_temp) / 1000;
+                bpf_probe_read_kernel(&real_val, sizeof(real_val), msr_val);
+                fake_val = real_val;
                 
-                /* Thay đổi DTS bits trong MSR_IA32_THERM_STATUS */
-                fake_val = (fake_val & ~(0x7FULL << 16)) | ((u64)target_dts << 16);
-                modified = true;
-            }
-            
-            /* Giả mạo MSR tần số */
-            if (msr_addr == MSR_IA32_PERF_STATUS) {
-                u16 target_ratio = cfg->target_freq / 100000;
-                if (target_ratio) {
-                    fake_val = (fake_val & 0xFFFFFFFFFFFF0000ULL) | target_ratio;
+                bool modified = false;
+                
+                /* Giả mạo nhiệt độ CPU trong MSR_IA32_THERM_STATUS */
+                if (msr_addr == MSR_IA32_THERM_STATUS) {
+                    u32 target_dts = 100 - (cfg->target_temp / 1000); /* Chuyển đổi từ milli-Celsius */
+                    /* Thay đổi DTS bits trong MSR_IA32_THERM_STATUS */
+                    fake_val = (fake_val & ~(0x7FULL << 16)) | ((u64)target_dts << 16);
                     modified = true;
                 }
-            }
-            
-            /* Ghi giá trị giả mạo nếu có thay đổi */
-            if (modified) {
-                bpf_probe_write_user(msr_val, &fake_val, sizeof(fake_val));
                 
-                /* Ghi sự kiện cloaking */
-                u32 pid = bpf_get_current_pid_tgid();
-                log_event(pid, 0, 0, 0, METHOD_MSR, EVENT_CLOAK_ACTIVE);
+                /* Giả mạo MSR tần số */
+                if (msr_addr == MSR_IA32_PERF_STATUS) {
+                    u16 target_ratio = cfg->target_freq / 100000;
+                    if (target_ratio) {
+                        fake_val = (fake_val & 0xFFFFFFFFFFFF0000ULL) | target_ratio;
+                        modified = true;
+                    }
+                }
+                
+                /* Lưu fake value vào map thay vì ghi trực tiếp - ENHANCED SECURITY */
+                if (modified) {
+                    bpf_map_update_elem(&fake_msr_map, &msr_addr, &fake_val, BPF_ANY);
+                    
+                    /* Gửi signal cho userspace interceptor */
+                    u32 pid = bpf_get_current_pid_tgid();
+                    u64 request_id = ((u64)pid << 32) | (msr_addr & 0xFFFFFFFF);
+                    u32 intercept_flag = 1;
+                    bpf_map_update_elem(&interception_tracker, &request_id, &intercept_flag, BPF_ANY);
+                    
+                    /* Ghi sự kiện cloaking */
+                    log_event(pid, 0, 0, 0, METHOD_MSR, EVENT_CLOAK_ACTIVE);
+                }
             }
         }
     }
@@ -694,9 +739,13 @@ int probe_sched_setattr(struct pt_regs *ctx) {
         if (cfg && cfg->enabled) {
             u32 util_value = cfg->target_util;
             if (util_value > 0) {
-                /* Ghi đè lên giá trị util_clamp_max */
-                u32 offset_util_max = offsetof(struct sched_attr, sched_util_max);
-                bpf_probe_write_user((void *)attr + offset_util_max, &util_value, sizeof(util_value));
+                /* Lưu fake util_clamp_max vào map thay vì ghi trực tiếp - ENHANCED SECURITY */
+                bpf_map_update_elem(&fake_sched_attr_map, &pid, &util_value, BPF_ANY);
+                
+                /* Tạo interception request */
+                u64 request_id = ((u64)pid << 32) | 0x1001; /* syscall ID for sched_setattr */
+                u32 intercept_flag = 2; /* Type 2: scheduler attribute interception */
+                bpf_map_update_elem(&interception_tracker, &request_id, &intercept_flag, BPF_ANY);
                 
                 /* Ghi sự kiện cloaking */
                 log_event(pid, 0, 0, 0, METHOD_PROBES, EVENT_CLOAK_ACTIVE);
@@ -729,10 +778,10 @@ int probe_rdt_read(struct pt_regs *ctx) {
             /* Giả mạo giá trị - giảm mức sử dụng cache */
             u64 fake_value = counter_value / 2;  /* Giảm 50% */
             
-            /* Ghi lại giá trị đã giả mạo */
-            void *counter_ptr;
-            bpf_probe_read_kernel(&counter_ptr, sizeof(counter_ptr), (void *)PT_REGS_PARM2(ctx));
-            bpf_probe_write_user(counter_ptr, &fake_value, sizeof(fake_value));
+            /* Ghi lại giá trị đã giả mạo - DISABLED for security */
+            // void *counter_ptr;
+            // bpf_probe_read_kernel(&counter_ptr, sizeof(counter_ptr), (void *)PT_REGS_PARM2(ctx));
+            // bpf_probe_write_user(counter_ptr, &fake_value, sizeof(fake_value));
         }
     }
     
@@ -945,9 +994,9 @@ int probe_rapl_read(struct pt_regs *ctx) {
             u64 energy_val;
             bpf_probe_read_kernel(&energy_val, sizeof(energy_val), energy_ptr);
 
-            /* Giả mạo - giảm 30% mức tiêu thụ */
-            u64 fake_val = energy_val * 7 / 10;
-            bpf_probe_write_user(energy_ptr, &fake_val, sizeof(fake_val));
+            /* Giả mạo - giảm 30% mức tiêu thụ - DISABLED for security */
+            // u64 fake_val = energy_val * 7 / 10;
+            // bpf_probe_write_user(energy_ptr, &fake_val, sizeof(fake_val));
         }
     }
     
@@ -1027,18 +1076,24 @@ const volatile u64 g_default_quota_ns = 120000000ULL; /* Hạn mức mặc đị
 
 /* Ghi quota mặc định khi cgroup được tạo */
 SEC("tracepoint/cgroup/cgroup_mkdir")
-int on_cgroup_create(struct trace_event_raw_cgroup_mkdir *ctx)
+int on_cgroup_create(void *ctx)
 {
-    u64 cgid = ctx->id;
-    bpf_map_update_elem(&quota_cg, &cgid, &g_default_quota_ns, BPF_NOEXIST);
+    /* Truy xuất cgroup ID từ tracepoint args */
+    u64 cgid;
+    if (bpf_probe_read_kernel(&cgid, sizeof(cgid), ctx + 8) == 0) {
+        bpf_map_update_elem(&quota_cg, &cgid, &g_default_quota_ns, BPF_NOEXIST);
+    }
     return 0;
 }
 
 /* Xoá quota khi cgroup bị huỷ */
 SEC("tracepoint/cgroup/cgroup_destroy")
-int on_cgroup_destroy(struct trace_event_raw_cgroup_destroy *ctx)
+int on_cgroup_destroy(void *ctx)
 {
-    u64 cgid = ctx->id;
-    bpf_map_delete_elem(&quota_cg, &cgid);
+    /* Truy xuất cgroup ID từ tracepoint args */
+    u64 cgid;
+    if (bpf_probe_read_kernel(&cgid, sizeof(cgid), ctx + 8) == 0) {
+        bpf_map_delete_elem(&quota_cg, &cgid);
+    }
     return 0;
 } 

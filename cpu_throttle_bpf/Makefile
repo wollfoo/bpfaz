@@ -27,7 +27,7 @@ CLANG_MAJOR := $(shell echo $(CLANG_VERSION) | cut -d'.' -f1)
 CLANG_MINOR := $(shell echo $(CLANG_VERSION) | cut -d'.' -f2)
 
 # Đường dẫn tới bpftool
-BPFTOOL := /usr/local/bin/bpftool
+BPFTOOL := /usr/sbin/bpftool
 
 # Kiểm tra phụ thuộc
 CHECK_DEPS := $(shell which $(BPFTOOL) > /dev/null && echo 1 || echo 0)
@@ -160,8 +160,9 @@ TEST_SRCS = $(TEST_CPU_THROTTLE) $(TEST_CLOAKING)
 # Mục tiêu đầu ra
 APP_TARGET = $(OBJ_DIR)/attach_throttle
 CTL_TARGET = $(OBJ_DIR)/throttle_ctl
-BPF_TARGET = $(OBJ_DIR)/cpu_throttle_bpf.bpf.o
+BPF_TARGET = $(OBJ_DIR)/cpu_throttle_bpf.o
 SKEL_TARGET = $(OBJ_DIR)/cpu_throttle_bpf.skel.h
+INTERCEPTOR_TARGET = $(OBJ_DIR)/libcloaking_interceptor.so
 
 # Mục tiêu kiểm thử
 TEST_CPU_THROTTLE_TARGET = tests/test_cpu_throttle
@@ -173,7 +174,7 @@ LIBS = -lelf -lz -lbpf -lpthread -lm $(RDT_LIBS) $(SECCOMP_LIBS)
 
 # Mục tiêu chính
 .PHONY: all
-all: app
+all: $(APP_TARGET) $(CTL_TARGET) $(INTERCEPTOR_TARGET)
 
 # Kiểm tra các phụ thuộc
 .PHONY: check-deps
@@ -238,6 +239,13 @@ $(OBJ_DIR)/%.bpf.o: %.bpf.c vmlinux check-tools
 		echo "BTF không khả dụng trên hệ thống này"; \
 		$(BPFTOOL) gen skeleton $@ > $(@:.o=.skel.h); \
 	fi
+
+# Rule đặc biệt cho cpu_throttle_bpf.c
+$(BPF_TARGET): $(BPF_SRCS) vmlinux check-tools
+	@mkdir -p $(dir $@)
+	@echo "Biên dịch $< thành $@"
+	@$(CLANG) $(BPF_CFLAGS) -c $< -o $@
+	@echo "BPF object file đã tạo: $@"
 
 .PHONY: skeleton
 skeleton: $(BPF_TARGET)
@@ -332,3 +340,11 @@ info:
 	@echo "  RDT: $(HAS_RDT)"
 	@echo "  MSR: $(HAS_MSR)"
 	@echo "  Seccomp: $(HAS_SECCOMP)"
+
+# Enhanced Cloaking Interceptor - Shared Library
+$(INTERCEPTOR_TARGET): enhanced_cloaking_interceptor.c
+	@mkdir -p $(dir $@)
+	@echo "Biên dịch Enhanced Cloaking Interceptor"
+	@$(CC) $(CFLAGS) -shared -fPIC -ldl -lpthread -lbpf \
+		-o $@ $< $(LIBS)
+	@echo "✅ Interceptor shared library: $@"
