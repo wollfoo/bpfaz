@@ -1,0 +1,15 @@
+event syntax error: '..ches,power/energy-cores/'
+                                  \___ Bad event or PMU
+
+Unable to find PMU or event on a PMU of 'power'
+
+Initial error:
+event syntax error: '..ches,power/energy-cores/'
+                                  \___ unknown term 'energy-cores' for pmu 'power'
+
+valid terms: event,config,config1,config2,config3,name,period,percore,metric-id
+Run 'perf list' for a list of valid events
+
+ Usage: perf stat [<options>] [<command>]
+
+    -e, --event <event>   event selector. use 'perf list' to list available events

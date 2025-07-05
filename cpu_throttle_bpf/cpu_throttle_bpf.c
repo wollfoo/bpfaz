@@ -633,7 +633,7 @@ static int set_uclamp(pid_t __attribute__((unused)) pid, __u32 __attribute__((un
 /* ----------------- TRACEPOINT/KPROBE HANDLERS ----------------- */
 
 /* 1. BPF Ring Buffer + PSI Tracepoint - tương thích kernel 6.8 */
-SEC("tp/psi/psi_cpu_some")
+SEC("tp/pressure/psi_cpu_some")
 int on_psi_cpu(void *ctx __attribute__((unused))) {
     if (!g_enable_psi)
         return 0;
@@ -665,7 +665,7 @@ int on_psi_cpu(void *ctx __attribute__((unused))) {
 }
 
 /* 2. MSR (Model Specific Registers) via kprobe - tương thích kernel 6.8 */
-SEC("kprobe/rdmsr")
+SEC("fentry/native_read_msr")
 int probe_read_msr(struct pt_regs *ctx) {
     if (!(g_active_methods & (1 << METHOD_MSR)))
         return 0;

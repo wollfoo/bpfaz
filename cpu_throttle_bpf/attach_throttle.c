@@ -33,7 +33,7 @@ typedef uint64_t u64;
 /* Cài đặt hỗ trợ Intel RDT nếu có */
 #include <stdlib.h>
 /* Định nghĩa NO_RDT để bỏ qua tính năng RDT */
-#define NO_RDT 1
+// #define NO_RDT 1  /* Đã tắt để bật hỗ trợ Intel RDT */
 #ifndef NO_RDT
 #include <pqos.h>
 #endif
@@ -456,8 +456,8 @@ static bool setup_perf_events(void) {
         return false;
         
     static struct perf_event_attr attr = {
-        .type = PERF_TYPE_HARDWARE,
-        .config = PERF_COUNT_HW_INSTRUCTIONS,
+        .type = PERF_TYPE_SOFTWARE,
+        .config = PERF_COUNT_SW_TASK_CLOCK,
         .size = sizeof(struct perf_event_attr),
         .sample_period = 1000000, // 1M instructions
         .sample_type = PERF_SAMPLE_PERIOD,

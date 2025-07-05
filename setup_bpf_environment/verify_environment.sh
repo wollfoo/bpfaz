@@ -137,33 +137,26 @@ check_system_basics() {
     local kernel_version=$(uname -r)
     local kernel_major=$(echo "$kernel_version" | cut -d. -f1)
     local kernel_minor=$(echo "$kernel_version" | cut -d. -f2)
-    local kernel_patch=$(echo "$kernel_version" | cut -d. -f3 | cut -d- -f1)
 
     if [[ $kernel_major -gt 6 ]] || [[ $kernel_major -eq 6 && $kernel_minor -ge 8 ]]; then
         # Detect kernel type and provide specific feedback
-        if [[ "$kernel_version" == *"generic"* ]]; then
-            log_success "Kernel $kernel_version (HWE - Hardware Enablement)"
-            if [[ "$DETAILED_MODE" == "true" ]]; then
-                log_detail "HWE kernel provides enhanced BPF capabilities and latest hardware support"
-            fi
-        elif [[ "$kernel_version" == *"azure"* ]]; then
-            log_success "Kernel $kernel_version (Azure-optimized)"
-            if [[ "$DETAILED_MODE" == "true" ]]; then
-                log_detail "Azure kernel optimized for cloud environments"
-            fi
-        elif [[ "$kernel_version" == *"aws"* ]]; then
-            log_success "Kernel $kernel_version (AWS-optimized)"
-            if [[ "$DETAILED_MODE" == "true" ]]; then
-                log_detail "AWS kernel optimized for EC2 environments"
-            fi
-        elif [[ "$kernel_version" == *"gcp"* ]]; then
-            log_success "Kernel $kernel_version (GCP-optimized)"
-            if [[ "$DETAILED_MODE" == "true" ]]; then
-                log_detail "GCP kernel optimized for Google Cloud environments"
-            fi
-        else
-            log_success "Kernel $kernel_version (>= 6.8 required)"
-        fi
+        case "$kernel_version" in
+            *generic*)
+                log_success "Kernel $kernel_version (HWE - Hardware Enablement)"
+                ;;
+            *azure*)
+                log_success "Kernel $kernel_version (Azure-optimized)"
+                ;;
+            *aws*)
+                log_success "Kernel $kernel_version (AWS-optimized)"
+                ;;
+            *gcp*)
+                log_success "Kernel $kernel_version (GCP-optimized)"
+                ;;
+            *)
+                log_success "Kernel $kernel_version (>= 6.8 required)"
+                ;;
+        esac
     else
         log_error "Kernel $kernel_version < 6.8 (upgrade required)"
     fi
