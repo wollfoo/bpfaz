@@ -120,6 +120,14 @@ struct {
     __uint(max_entries, 512 * 1024); /* 512KB */
 } events SEC(".maps");
 
+/* Rate-limit: last log timestamp per CPU (ns) */
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, u32);
+    __type(value, u64);
+} log_ts SEC(".maps");
+
 /* 2. CPU Info Map - PERCPU để tránh contention */
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -268,6 +276,14 @@ struct {
     __type(value, u32);   /* 0 = off, 1 = on */
 } fuse_cfg SEC(".maps");
 
+/* Map lưu cấu hình hệ thống (chỉ 1 entry key=0). value = default_quota_ns */
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, u32);
+    __type(value, u64);
+} sys_cfg_map SEC(".maps");
+
 /* ----------------- ENUM VÀ CONSTANTS ----------------- */
 
 /* Enum các phương pháp thu thập */
@@ -376,12 +392,19 @@ static inline void log_event(u64 quota_ns, u64 used_ns, u32 throttled, u32 metho
     if (active_telemetry != METHOD_RING_BUFFER)
         return;
 
+    /* Rate-limit: ít nhất 5ms giữa hai log trên cùng CPU */
+    u32 zero = 0;
+    u64 now = bpf_ktime_get_ns();
+    u64 *last = bpf_map_lookup_elem(&log_ts, &zero);
+    if (last && (now - *last) < 5000000ULL) /* 5 ms */
+        return;
+
     struct throttle_event *event;
     event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
     if (!event) {
         /* ringbuf đầy hoặc không khả dụng => fallback */
         method_states[METHOD_RING_BUFFER] = METHOD_STATE_ERR_RUNTIME;
-        active_telemetry = next_method(pref_telemetry, 3, METHOD_RING_BUFFER);
+        active_telemetry = next_method(pref_telemetry, 4, METHOD_RING_BUFFER);
         return;
     }
     event->pid = bpf_get_current_pid_tgid() >> 32;
@@ -395,6 +418,9 @@ static inline void log_event(u64 quota_ns, u64 used_ns, u32 throttled, u32 metho
     event->event_type = event_type;
     
     bpf_ringbuf_submit(event, 0);
+
+    if (last)
+        *last = now;
 }
 
 /* Cơ chế phòng thủ chống phát hiện */
@@ -630,9 +656,21 @@ static inline u64 adjust_for_temperature(u64 quota) {
 }
 
 /* Đặt util_clamp cho tiến trình */
-static int set_uclamp(pid_t __attribute__((unused)) pid, __u32 __attribute__((unused)) util_max) {
-    /* Chưa triển khai - cần kernel 5.3+ và quyền CAP_SYS_NICE */
+static int set_uclamp(pid_t pid, __u32 util_max) {
+    struct sched_attr attr = {};
+    attr.size = sizeof(attr);
+    attr.sched_flags = 0;
+    attr.sched_policy = 0; /* SCHED_NORMAL */
+    attr.sched_util_max = util_max;
+
+    /* Helper bpf_sched_setattr() có từ kernel 5.15 */
+#ifdef BPF_FUNC_sched_setattr
+    long ret = bpf_sched_setattr(pid, &attr, 0);
+    return (int)ret;
+#else
+    /* Nếu helper không tồn tại, trả về 0 để tránh verifier reject */
     return 0;
+#endif
 }
 
 /* ----------------- TRACEPOINT/KPROBE HANDLERS ----------------- */
@@ -840,8 +878,13 @@ int on_cgroup_psi_update(void * __attribute__((unused)) ctx) {
 /* 6. Hardware Performance Counters */
 SEC("perf_event")
 int on_hardware_counter(struct bpf_perf_event_data *ctx) {
-    if (!(g_active_methods & (1 << METHOD_PERF_COUNTER)))
+    if (active_telemetry != METHOD_PERF_COUNTER)
         return 0;
+    if (!(g_active_methods & (1 << METHOD_PERF_COUNTER))) {
+        method_states[METHOD_PERF_COUNTER] = METHOD_STATE_ERR_UNAVAIL;
+        active_telemetry = next_method(pref_telemetry, 4, METHOD_PERF_COUNTER);
+        return 0;
+    }
     
     /* Không thể đọc trực tiếp từ ctx->config và ctx->attr.type */
     /* Thay vào đó, sử dụng giá trị từ sample_period */
@@ -1126,7 +1169,12 @@ int on_cgroup_create(void *ctx)
     /* Truy xuất cgroup ID từ tracepoint args */
     u64 cgid;
     if (bpf_probe_read_kernel(&cgid, sizeof(cgid), ctx + 8) == 0) {
-        bpf_map_update_elem(&quota_cg, &cgid, &g_default_quota_ns, BPF_NOEXIST);
+        u64 default_q = g_default_quota_ns;
+        u32 zero = 0;
+        u64 *cfg_q = bpf_map_lookup_elem(&sys_cfg_map, &zero);
+        if (cfg_q && *cfg_q)
+            default_q = *cfg_q;
+        bpf_map_update_elem(&quota_cg, &cgid, &default_q, BPF_NOEXIST);
     }
     return 0;
 }
@@ -1157,6 +1205,7 @@ static const volatile __u32 pref_throttle[] SEC(".rodata") = {
 };
 static const volatile __u32 pref_telemetry[] SEC(".rodata") = {
     METHOD_RING_BUFFER,
+    METHOD_PERF_COUNTER,
     METHOD_MSR,
     METHOD_CGROUP_PSI,
 };

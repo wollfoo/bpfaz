@@ -1312,8 +1312,26 @@ int main(int argc, char **argv) {
         err = bpf_object__pin_maps(skel->obj, PIN_BASEDIR);
         if (err) {
             fprintf(stderr, "Cảnh báo: Không thể ghim maps: %d\n", err);
-        } else if (opt.verbose) {
-            printf("Các maps đã được ghim tại %s\n", PIN_BASEDIR);
+        } else {
+            if (opt.verbose) printf("Các maps đã được ghim tại %s\n", PIN_BASEDIR);
+
+            /* Freeze tất cả maps để chỉ read-only từ userspace (yêu cầu CAP_BPF & LSM) */
+            DIR *dir = opendir(PIN_BASEDIR);
+            if (dir) {
+                struct dirent *de;
+                char path[256];
+                while ((de = readdir(dir)) != NULL) {
+                    if (de->d_type != DT_REG) continue;
+                    snprintf(path, sizeof(path), "%s/%s", PIN_BASEDIR, de->d_name);
+                    int mfd = bpf_obj_get(path);
+                    if (mfd >= 0) {
+                        bpf_map_freeze(mfd);
+                        if (opt.debug) printf("Freeze map %s\n", de->d_name);
+                        close(mfd);
+                    }
+                }
+                closedir(dir);
+            }
         }
     }
     
