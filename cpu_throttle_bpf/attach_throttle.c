@@ -1159,12 +1159,19 @@ int main(int argc, char **argv) {
     
     /* Xử lý tham số dòng lệnh */
     parse_args(argc, argv);
-    
-    /* Kiểm tra tùy chọn skip-btf */
-    for (i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--skip-btf") == 0) {
-            skip_btf = true;
-            break;
+
+    /* ------------------------------------------------------------- */
+    /*  Auto-detect hwmon path nếu người dùng KHÔNG cung cấp --hwmon */
+    /* ------------------------------------------------------------- */
+    if (!opt.hwmon_path[0]) {
+        char detected[256] = {0};
+        if (find_thermal_path(detected, sizeof(detected)) == 0) {
+            strncpy(opt.hwmon_path, detected, sizeof(opt.hwmon_path) - 1);
+            opt.use_hwmon = true;
+            if (opt.verbose)
+                printf("[AUTO] Phát hiện hwmon_path: %s\n", opt.hwmon_path);
+        } else if (opt.verbose) {
+            printf("[AUTO] Không phát hiện cảm biến nhiệt độ phù hợp, bỏ qua hwmon\n");
         }
     }
 
@@ -1216,7 +1223,7 @@ int main(int argc, char **argv) {
     skel->rodata->g_collection_interval_ms = opt.collection_interval_ms;
     skel->rodata->g_default_quota_ns = 120000000ULL;
     
-    /* Cập nhật đường dẫn hwmon */
+    /* Cập nhật đường dẫn hwmon (dò tự động hoặc user cung cấp) */
     if (opt.hwmon_path[0]) {
         strncpy((char *)skel->rodata->hwmon_path, opt.hwmon_path, 
                 sizeof(skel->rodata->hwmon_path) - 1);
