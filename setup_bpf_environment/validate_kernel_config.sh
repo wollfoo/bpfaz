@@ -8,6 +8,9 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KERNEL_VERSION=$(uname -r)
 AZURE_KERNEL_PATTERN="azure"
+GENERIC_KERNEL_PATTERN="generic"
+AWS_KERNEL_PATTERN="aws"
+GCP_KERNEL_PATTERN="gcp"
 
 # Colors for output
 RED='\033[0;31m'
@@ -23,6 +26,9 @@ STRICT_MODE=false
 COMPREHENSIVE_MODE=false
 TEST_RUNTIME=false
 AZURE_MODE=false
+GENERIC_MODE=false
+AWS_MODE=false
+GCP_MODE=false
 FIX_ATTEMPTS=false
 OUTPUT_FORMAT="human"
 LOG_LEVEL="INFO"
@@ -69,13 +75,34 @@ log_critical() {
 
 # Banner
 print_banner() {
+    local kernel_type="Standard"
+    local environment_desc=""
+
+    # Auto-detect kernel type and set appropriate mode
+    if [[ "$KERNEL_VERSION" =~ $AZURE_KERNEL_PATTERN ]]; then
+        kernel_type="Azure Cloud"
+        environment_desc="Azure Cloud (optimized validation)"
+        AZURE_MODE=true
+    elif [[ "$KERNEL_VERSION" =~ $AWS_KERNEL_PATTERN ]]; then
+        kernel_type="AWS Cloud"
+        environment_desc="AWS Cloud (optimized validation)"
+        AWS_MODE=true
+    elif [[ "$KERNEL_VERSION" =~ $GCP_KERNEL_PATTERN ]]; then
+        kernel_type="GCP Cloud"
+        environment_desc="GCP Cloud (optimized validation)"
+        GCP_MODE=true
+    elif [[ "$KERNEL_VERSION" =~ $GENERIC_KERNEL_PATTERN ]]; then
+        kernel_type="HWE (Hardware Enablement)"
+        environment_desc="Ubuntu HWE kernel (enhanced BPF support)"
+        GENERIC_MODE=true
+    fi
+
     echo "================================================================"
     echo "  🔍 Kernel Configuration Validation for eBPF Operations"
     echo "  Target: hide_process_bpf compatibility verification"
-    echo "  Kernel: $KERNEL_VERSION"
-    if [[ "$KERNEL_VERSION" =~ $AZURE_KERNEL_PATTERN ]]; then
-        echo "  Environment: Azure Cloud (optimized validation)"
-        AZURE_MODE=true
+    echo "  Kernel: $KERNEL_VERSION ($kernel_type)"
+    if [[ -n "$environment_desc" ]]; then
+        echo "  Environment: $environment_desc"
     fi
     echo "================================================================"
     echo ""
@@ -93,16 +120,20 @@ OPTIONS:
     --comprehensive         Run comprehensive validation including runtime tests
     --test-runtime          Test actual BPF functionality (requires root)
     --azure-mode            Enable Azure cloud-specific optimizations
+    --generic-mode          Enable generic/HWE kernel optimizations
+    --aws-mode              Enable AWS cloud-specific optimizations
+    --gcp-mode              Enable GCP cloud-specific optimizations
     --fix-attempts          Attempt to fix minor issues automatically
     --output-format FORMAT  Output format: human, json (default: human)
     --log-level LEVEL       Log level: ERROR, WARN, INFO, DEBUG (default: INFO)
     -h, --help              Show this help message
 
 EXAMPLES:
-    $0                      # Basic validation
+    $0                      # Basic validation (auto-detects kernel type)
     $0 --strict             # Strict mode (fail on warnings)
     $0 --comprehensive      # Full validation with runtime tests
     $0 --azure-mode         # Azure cloud optimized validation
+    $0 --generic-mode       # Generic/HWE kernel optimized validation
 
 EXIT CODES:
     0   All validations passed
@@ -132,6 +163,18 @@ parse_arguments() {
                 ;;
             --azure-mode)
                 AZURE_MODE=true
+                shift
+                ;;
+            --generic-mode)
+                GENERIC_MODE=true
+                shift
+                ;;
+            --aws-mode)
+                AWS_MODE=true
+                shift
+                ;;
+            --gcp-mode)
+                GCP_MODE=true
                 shift
                 ;;
             --fix-attempts)
@@ -391,6 +434,55 @@ test_bpf_functionality() {
     fi
 }
 
+# Generic/HWE kernel-specific validations
+validate_generic_environment() {
+    if [[ "$GENERIC_MODE" != "true" ]]; then
+        return 0
+    fi
+
+    log_info "Performing Generic/HWE kernel-specific validations..."
+
+    # Check HWE kernel version compatibility
+    if [[ "$KERNEL_VERSION" =~ 6\.8\.0.*generic ]]; then
+        log_success "HWE kernel version $KERNEL_VERSION is fully supported"
+        log_info "HWE kernel benefits:"
+        log_info "  - Latest hardware support and drivers"
+        log_info "  - Enhanced BPF capabilities and performance"
+        log_info "  - Better compatibility with modern eBPF features"
+    else
+        log_warn "Kernel version $KERNEL_VERSION may not be HWE-optimized"
+        log_warn "Recommended: Use Ubuntu HWE kernel (6.8.0-*-generic)"
+    fi
+
+    # Check for HWE-specific features
+    log_info "HWE kernel features:"
+    log_info "  - Full BTF support for CO-RE (Compile Once, Run Everywhere)"
+    log_info "  - Enhanced kprobe and tracepoint support"
+    log_info "  - Improved BPF verifier with relaxed constraints"
+    log_info "  - Better performance for BPF programs"
+
+    # Additional HWE-specific checks
+    ((TOTAL_CHECKS++))
+    if [[ -d /sys/kernel/debug/tracing ]]; then
+        log_success "Enhanced tracing infrastructure available"
+        ((PASSED_CHECKS++))
+    else
+        log_warn "Enhanced tracing infrastructure not available"
+        if [[ "$FIX_ATTEMPTS" == "true" ]] && [[ $EUID -eq 0 ]]; then
+            log_info "Attempting to mount debugfs..."
+            if mount -t debugfs none /sys/kernel/debug 2>/dev/null; then
+                log_success "Debugfs mounted successfully"
+                ((PASSED_CHECKS++))
+            else
+                log_warn "Failed to mount debugfs automatically"
+                log_warn "Solution: Run 'sudo mount -t debugfs none /sys/kernel/debug'"
+            fi
+        else
+            log_warn "Solution: Mount debugfs with 'sudo mount -t debugfs none /sys/kernel/debug'"
+        fi
+    fi
+}
+
 # Azure-specific validations
 validate_azure_environment() {
     if [[ "$AZURE_MODE" != "true" ]]; then
@@ -414,13 +506,62 @@ validate_azure_environment() {
     log_info "  - Consider using Azure Container Instances for testing"
 }
 
+# AWS-specific validations
+validate_aws_environment() {
+    if [[ "$AWS_MODE" != "true" ]]; then
+        return 0
+    fi
+
+    log_info "Performing AWS cloud-specific validations..."
+
+    # Check AWS kernel version compatibility
+    if [[ "$KERNEL_VERSION" =~ 6\.8\.0.*aws ]]; then
+        log_success "AWS kernel version $KERNEL_VERSION is supported"
+    else
+        log_warn "Kernel version $KERNEL_VERSION may not be optimized for AWS"
+        log_warn "Recommended: Use AWS-optimized kernel (6.8.0-*-aws)"
+    fi
+
+    log_info "AWS environment notes:"
+    log_info "  - Enhanced networking BPF features available"
+    log_info "  - Consider EC2 instance type limitations"
+    log_info "  - Some BPF features may require specific instance types"
+}
+
+# GCP-specific validations
+validate_gcp_environment() {
+    if [[ "$GCP_MODE" != "true" ]]; then
+        return 0
+    fi
+
+    log_info "Performing GCP cloud-specific validations..."
+
+    # Check GCP kernel version compatibility
+    if [[ "$KERNEL_VERSION" =~ 6\.8\.0.*gcp ]]; then
+        log_success "GCP kernel version $KERNEL_VERSION is supported"
+    else
+        log_warn "Kernel version $KERNEL_VERSION may not be optimized for GCP"
+        log_warn "Recommended: Use GCP-optimized kernel (6.8.0-*-gcp)"
+    fi
+
+    log_info "GCP environment notes:"
+    log_info "  - Container-optimized features available"
+    log_info "  - Consider using Container-Optimized OS for containers"
+    log_info "  - Some BPF features optimized for GKE workloads"
+}
+
 # Generate JSON output
 generate_json_output() {
     cat << EOF
 {
   "validation_summary": {
     "kernel_version": "$KERNEL_VERSION",
-    "azure_environment": $AZURE_MODE,
+    "environment_modes": {
+      "azure_mode": $AZURE_MODE,
+      "generic_mode": $GENERIC_MODE,
+      "aws_mode": $AWS_MODE,
+      "gcp_mode": $GCP_MODE
+    },
     "total_checks": $TOTAL_CHECKS,
     "passed_checks": $PASSED_CHECKS,
     "critical_errors": $CRITICAL_ERRORS,
@@ -556,7 +697,16 @@ main() {
         echo ""
     fi
 
+    validate_generic_environment
+    echo ""
+
     validate_azure_environment
+    echo ""
+
+    validate_aws_environment
+    echo ""
+
+    validate_gcp_environment
     echo ""
 
     # Output results

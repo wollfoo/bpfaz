@@ -90,9 +90,25 @@ EOF
 
 # Banner
 print_banner() {
+    local current_kernel=$(uname -r)
+    local current_os=$(lsb_release -d 2>/dev/null | cut -f2 | cut -d' ' -f1-2 || echo "Ubuntu 22.04")
+    local kernel_type=""
+
+    # Detect kernel type
+    if [[ "$current_kernel" == *"azure"* ]]; then
+        kernel_type=" (Azure)"
+    elif [[ "$current_kernel" == *"aws"* ]]; then
+        kernel_type=" (AWS)"
+    elif [[ "$current_kernel" == *"gcp"* ]]; then
+        kernel_type=" (GCP)"
+    elif [[ "$current_kernel" == *"generic"* ]]; then
+        kernel_type=" (HWE)"
+    fi
+
     echo "================================================================"
     echo "  🔍 eBPF Environment Verification for hide_process_bpf"
     echo "  Target: Complete compilation readiness assessment"
+    echo "  Environment: $current_os + Kernel $current_kernel$kernel_type"
     echo "================================================================"
     echo ""
 }
@@ -111,13 +127,29 @@ check_system_basics() {
         log_detail "Current OS: $(lsb_release -d | cut -f2 2>/dev/null || cat /etc/os-release | grep PRETTY_NAME)"
     fi
     
-    # Kernel version
+    # Kernel version with type detection
     local kernel_version=$(uname -r)
     local kernel_major=$(echo "$kernel_version" | cut -d. -f1)
     local kernel_minor=$(echo "$kernel_version" | cut -d. -f2)
-    
+    local kernel_patch=$(echo "$kernel_version" | cut -d. -f3 | cut -d- -f1)
+
     if [[ $kernel_major -gt 6 ]] || [[ $kernel_major -eq 6 && $kernel_minor -ge 8 ]]; then
-        log_success "Kernel $kernel_version (>= 6.8 required)"
+        # Detect kernel type and provide specific feedback
+        if [[ "$kernel_version" == *"generic"* ]]; then
+            log_success "Kernel $kernel_version (HWE - Hardware Enablement)"
+            log_detail "HWE kernel provides enhanced BPF capabilities and latest hardware support"
+        elif [[ "$kernel_version" == *"azure"* ]]; then
+            log_success "Kernel $kernel_version (Azure-optimized)"
+            log_detail "Azure kernel optimized for cloud environments"
+        elif [[ "$kernel_version" == *"aws"* ]]; then
+            log_success "Kernel $kernel_version (AWS-optimized)"
+            log_detail "AWS kernel optimized for EC2 environments"
+        elif [[ "$kernel_version" == *"gcp"* ]]; then
+            log_success "Kernel $kernel_version (GCP-optimized)"
+            log_detail "GCP kernel optimized for Google Cloud environments"
+        else
+            log_success "Kernel $kernel_version (>= 6.8 required)"
+        fi
     else
         log_error "Kernel $kernel_version < 6.8 (upgrade required)"
     fi
@@ -315,6 +347,8 @@ check_dev_packages() {
         "pkg-config:Package configuration tool"
         "git:Version control system"
         "cmake:Cross-platform build system"
+        "msr-tools:MSR (Model Specific Registers) tools"
+        "libfuse3-dev:FUSE3 development headers"
     )
     
     ((MAX_SCORE += ${#packages[@]}))
@@ -456,6 +490,90 @@ check_bpf_infrastructure() {
         log_error "bpftool not found"
     fi
     
+    echo ""
+}
+
+# Check MSR (Model Specific Registers) access
+check_msr_access() {
+    log_info "Checking MSR (Model Specific Registers) access..."
+    ((MAX_SCORE += 4))
+
+    # Check msr-tools availability
+    if command -v rdmsr >/dev/null 2>&1 && command -v wrmsr >/dev/null 2>&1; then
+        log_success "msr-tools (rdmsr/wrmsr) available"
+        if [[ "$DETAILED_MODE" == "true" ]]; then
+            local rdmsr_path=$(which rdmsr)
+            local wrmsr_path=$(which wrmsr)
+            log_detail "rdmsr: $rdmsr_path"
+            log_detail "wrmsr: $wrmsr_path"
+        fi
+    else
+        log_error "msr-tools not found (required for hardware monitoring)"
+        if [[ "$FIX_ISSUES" == "true" ]]; then
+            log_info "Installing msr-tools..."
+            if apt update -qq && apt install -y msr-tools; then
+                log_success "msr-tools installed successfully"
+            else
+                log_error "Failed to install msr-tools"
+            fi
+        fi
+    fi
+
+    # Check MSR module
+    if lsmod | grep -q "^msr "; then
+        log_success "MSR kernel module loaded"
+        if [[ "$DETAILED_MODE" == "true" ]]; then
+            local msr_info=$(lsmod | grep "^msr ")
+            log_detail "Module info: $msr_info"
+        fi
+    else
+        log_warning "MSR kernel module not loaded"
+        if [[ "$FIX_ISSUES" == "true" ]] && [[ $EUID -eq 0 ]]; then
+            log_info "Loading MSR module..."
+            if modprobe msr; then
+                log_success "MSR module loaded successfully"
+            else
+                log_error "Failed to load MSR module"
+            fi
+        else
+            log_detail "Solution: sudo modprobe msr"
+        fi
+    fi
+
+    # Check MSR device files
+    if ls /dev/cpu/*/msr >/dev/null 2>&1; then
+        local msr_count=$(ls /dev/cpu/*/msr 2>/dev/null | wc -l)
+        log_success "MSR device files available ($msr_count CPUs)"
+        if [[ "$DETAILED_MODE" == "true" ]]; then
+            log_detail "Device files:"
+            ls /dev/cpu/*/msr 2>/dev/null | head -3 | while read file; do
+                log_detail "  $file"
+            done
+            if [[ $msr_count -gt 3 ]]; then
+                log_detail "  ... and $((msr_count - 3)) more"
+            fi
+        fi
+    else
+        log_error "MSR device files not found"
+        log_detail "MSR access required for CPU temperature and power monitoring"
+    fi
+
+    # Check persistent MSR configuration
+    if [[ -f /etc/modules-load.d/msr.conf ]] && grep -q "^msr$" /etc/modules-load.d/msr.conf; then
+        log_success "MSR persistent loading configured (systemd)"
+    elif grep -q "^msr$" /etc/modules 2>/dev/null; then
+        log_success "MSR persistent loading configured (/etc/modules)"
+    else
+        log_warning "MSR persistent loading not configured"
+        if [[ "$FIX_ISSUES" == "true" ]] && [[ $EUID -eq 0 ]]; then
+            log_info "Configuring persistent MSR loading..."
+            echo "msr" > /etc/modules-load.d/msr.conf
+            log_success "MSR persistent loading configured"
+        else
+            log_detail "Solution: echo 'msr' | sudo tee /etc/modules-load.d/msr.conf"
+        fi
+    fi
+
     echo ""
 }
 

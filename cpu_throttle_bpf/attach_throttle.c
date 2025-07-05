@@ -367,27 +367,51 @@ static bool setup_rdt(void) {
 #endif
 }
 
-/* Đọc thông tin CPU từ MSR */
+/* Đọc thông tin CPU từ MSR với auto-loading và persistent setup */
 static bool setup_msr(void) {
     if (!opt.use_msr)
         return false;
-    
+
     /* Kiểm tra MSR truy cập có khả dụng không */
     if (access("/dev/cpu/0/msr", R_OK) != 0) {
-        /* Thử nạp msr module */
-        system("modprobe msr 2>/dev/null");
-        
+        if (opt.verbose)
+            printf("MSR device không khả dụng, đang thử load module...\n");
+
+        /* Thử nạp msr module với sudo */
+        int ret = system("sudo modprobe msr 2>/dev/null");
+        if (ret != 0) {
+            /* Thử không sudo (có thể đã có quyền) */
+            ret = system("modprobe msr 2>/dev/null");
+        }
+
+        /* Đợi một chút để device file được tạo */
+        usleep(100000); // 100ms
+
         if (access("/dev/cpu/0/msr", R_OK) != 0) {
-            if (opt.verbose)
+            if (opt.verbose) {
                 fprintf(stderr, "MSR access không khả dụng (/dev/cpu/0/msr)\n");
+                fprintf(stderr, "Hướng dẫn khắc phục:\n");
+                fprintf(stderr, "  1. Chạy: sudo modprobe msr\n");
+                fprintf(stderr, "  2. Hoặc thêm 'msr' vào /etc/modules\n");
+                fprintf(stderr, "  3. Hoặc tạo file: echo 'msr' | sudo tee /etc/modules-load.d/msr.conf\n");
+            }
             return false;
         }
     }
-    
+
+    /* Kiểm tra quyền đọc */
+    if (access("/dev/cpu/0/msr", R_OK) != 0) {
+        if (opt.verbose) {
+            fprintf(stderr, "MSR device tồn tại nhưng không có quyền đọc\n");
+            fprintf(stderr, "Cần chạy với quyền root hoặc thêm user vào group 'msr'\n");
+        }
+        return false;
+    }
+
     methods[METHOD_MSR].available = true;
     if (opt.verbose)
-        printf("MSR access được kích hoạt\n");
-    
+        printf("MSR access được kích hoạt thành công\n");
+
     return true;
 }
 

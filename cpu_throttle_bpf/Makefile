@@ -52,22 +52,30 @@ RDT_FLAGS :=
 RDT_LIBS :=
 
 ifeq ($(CPU_VENDOR),GenuineIntel)
-  ifneq ($(wildcard /usr/include/pqos.h),)
+  # Kiểm tra pqos.h trong cả /usr/include và /usr/local/include
+  ifneq ($(wildcard /usr/include/pqos.h /usr/local/include/pqos.h),)
     HAS_RDT := 1
-    RDT_FLAGS += -DHAS_RDT
-    RDT_LIBS += -lpqos
+    RDT_FLAGS += -DHAS_RDT -I/usr/local/include
+    RDT_LIBS += -L/usr/local/lib -lpqos
     $(info [INFO] Phát hiện hỗ trợ Intel RDT)
   else
     $(info [INFO] Intel CPU phát hiện, nhưng thư viện RDT (pqos.h) không tìm thấy. Xem xét cài đặt intel-cmt-cat.)
   endif
 endif
 
-# Cài đặt thư viện MSR
+# Cài đặt thư viện MSR với auto-loading
 HAS_MSR := $(shell if [ -e /dev/cpu/0/msr ]; then echo 1; else echo 0; fi)
 ifeq ($(HAS_MSR),1)
   $(info [INFO] MSR access khả dụng)
 else
-  $(info [WARN] MSR access không khả dụng. Một số tính năng có thể bị giới hạn.)
+  $(info [WARN] MSR access không khả dụng. Đang thử load MSR module...)
+  MSR_LOAD_RESULT := $(shell sudo modprobe msr 2>/dev/null && echo "success" || echo "failed")
+  ifeq ($(MSR_LOAD_RESULT),success)
+    HAS_MSR := 1
+    $(info [INFO] MSR module đã được load thành công)
+  else
+    $(info [ERROR] Không thể load MSR module. Kiểm tra quyền sudo hoặc kernel config.)
+  endif
 endif
 
 # Thiết lập LLVM và clang

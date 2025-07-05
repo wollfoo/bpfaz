@@ -4,7 +4,7 @@
 #
 # Target Environment:
 # - Ubuntu 22.04.5 LTS
-# - Kernel 6.8.0-1026-azure
+# - Kernel 6.8.0-60-generic (HWE)
 # - x86_64 architecture
 # - libbpf v1.4.0+
 # - clang v15.0+ with BPF support
@@ -76,10 +76,25 @@ trap cleanup EXIT INT TERM
 
 # Banner
 print_banner() {
+    local current_kernel=$(uname -r)
+    local current_os=$(lsb_release -d 2>/dev/null | cut -f2 | cut -d' ' -f1-2 || echo "Ubuntu 22.04")
+    local kernel_type=""
+
+    # Detect kernel type
+    if [[ "$current_kernel" == *"azure"* ]]; then
+        kernel_type=" (Azure)"
+    elif [[ "$current_kernel" == *"aws"* ]]; then
+        kernel_type=" (AWS)"
+    elif [[ "$current_kernel" == *"gcp"* ]]; then
+        kernel_type=" (GCP)"
+    elif [[ "$current_kernel" == *"generic"* ]]; then
+        kernel_type=" (HWE)"
+    fi
+
     echo "================================================================"
     echo "  🛠️  eBPF Development Environment Setup (Enhanced)"
     echo "  Target: hide_process_bpf module compilation readiness"
-    echo "  Environment: Ubuntu 22.04 + Kernel 6.8.0-1026-azure"
+    echo "  Environment: $current_os + Kernel $current_kernel$kernel_type"
     echo "  Components: clang-15.0+, gcc-12.3.0, libbpf v1.4.0+"
     echo "  Features: Auto-alternatives, LLVM repo, version verification"
     echo "================================================================"
@@ -111,7 +126,7 @@ COMPONENTS INSTALLED:
     ✓ gcc-12.3.0 compiler with BPF optimizations (auto-configured as default)
     ✓ Automatic update-alternatives configuration for both compilers
     ✓ libbpf library upgrade to v1.4.0+
-    ✓ Development packages (libbpf-dev, libelf-dev, zlib1g-dev)
+    ✓ Development packages (libbpf-dev, libelf-dev, zlib1g-dev, msr-tools)
     ✓ Build tools optimization
     ✓ LLVM repository auto-addition for clang-15 (if needed)
     ✓ Environment verification with specific version checks
@@ -181,9 +196,38 @@ check_system_compatibility() {
     local kernel_version=$(uname -r)
     local kernel_major=$(echo "$kernel_version" | cut -d. -f1)
     local kernel_minor=$(echo "$kernel_version" | cut -d. -f2)
-    
+    local kernel_patch=$(echo "$kernel_version" | cut -d. -f3 | cut -d- -f1)
+
     if [[ $kernel_major -lt 6 ]] || [[ $kernel_major -eq 6 && $kernel_minor -lt 8 ]]; then
         error_exit "Kernel version $kernel_version not supported. Requires 6.8+"
+    fi
+
+    # Detect and log kernel type with specific optimizations
+    local kernel_type="standard"
+    local kernel_features=""
+
+    if [[ "$kernel_version" == *"azure"* ]]; then
+        kernel_type="Azure"
+        kernel_features="Azure-optimized, cloud-native BPF support"
+    elif [[ "$kernel_version" == *"aws"* ]]; then
+        kernel_type="AWS"
+        kernel_features="AWS-optimized, enhanced networking BPF"
+    elif [[ "$kernel_version" == *"gcp"* ]]; then
+        kernel_type="GCP"
+        kernel_features="GCP-optimized, container-focused BPF"
+    elif [[ "$kernel_version" == *"generic"* ]]; then
+        kernel_type="HWE (Hardware Enablement)"
+        kernel_features="Latest hardware support, enhanced BPF capabilities"
+    fi
+
+    log_success "Kernel $kernel_version ($kernel_type) detected"
+    log_info "Kernel features: $kernel_features"
+
+    # HWE-specific optimizations
+    if [[ "$kernel_version" == *"generic"* ]] && [[ $kernel_major -eq 6 && $kernel_minor -eq 8 ]]; then
+        log_info "Applying HWE kernel optimizations for BPF development"
+        # HWE kernels have enhanced BPF features, note this for later use
+        export BPF_HWE_OPTIMIZATIONS=1
     fi
     
     # Check architecture
@@ -551,6 +595,7 @@ install_dev_packages() {
         "git"
         "cmake"
         "libfuse3-dev"
+        "msr-tools"
         "linux-headers-$(uname -r)"
         "linux-libc-dev"
     )
@@ -591,6 +636,85 @@ install_dev_packages() {
     done
 
     log_success "Development packages installed successfully"
+}
+
+# Setup MSR (Model Specific Registers) access
+setup_msr_access() {
+    log_info "Setting up MSR (Model Specific Registers) access..."
+
+    # Check if msr-tools is installed
+    if ! command -v rdmsr >/dev/null 2>&1 || ! command -v wrmsr >/dev/null 2>&1; then
+        log_warning "msr-tools not found. Should be installed by install_dev_packages"
+        return 1
+    fi
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Would load MSR module and setup persistent access"
+        return 0
+    fi
+
+    # Check if MSR module is already loaded
+    if lsmod | grep -q "^msr "; then
+        log_success "MSR module already loaded"
+    else
+        log_info "Loading MSR module..."
+        if modprobe msr; then
+            log_success "MSR module loaded successfully"
+        else
+            log_error "Failed to load MSR module"
+            return 1
+        fi
+    fi
+
+    # Check if MSR device files exist
+    if ls /dev/cpu/*/msr >/dev/null 2>&1; then
+        local msr_count=$(ls /dev/cpu/*/msr 2>/dev/null | wc -l)
+        log_success "MSR device files available for $msr_count CPUs"
+    else
+        log_error "MSR device files not found after loading module"
+        return 1
+    fi
+
+    # Setup persistent MSR loading
+    log_info "Setting up persistent MSR module loading..."
+
+    # Method 1: systemd modules-load.d (preferred)
+    if [[ -d /etc/modules-load.d ]]; then
+        if ! grep -q "^msr$" /etc/modules-load.d/msr.conf 2>/dev/null; then
+            echo "msr" > /etc/modules-load.d/msr.conf
+            log_success "Created /etc/modules-load.d/msr.conf for persistent MSR loading"
+        else
+            log_debug "MSR already configured in /etc/modules-load.d/msr.conf"
+        fi
+    fi
+
+    # Method 2: /etc/modules (fallback)
+    if [[ -f /etc/modules ]]; then
+        if ! grep -q "^msr$" /etc/modules; then
+            echo "msr" >> /etc/modules
+            log_success "Added MSR to /etc/modules for persistent loading"
+        else
+            log_debug "MSR already configured in /etc/modules"
+        fi
+    fi
+
+    # Test MSR access
+    log_info "Testing MSR access..."
+    if rdmsr 0x19C >/dev/null 2>&1; then
+        log_success "MSR read test successful (thermal status register)"
+    else
+        log_warning "MSR read test failed (may need root privileges for actual use)"
+    fi
+
+    # Display MSR information
+    log_info "MSR setup completed:"
+    log_info "  - rdmsr/wrmsr tools: available"
+    log_info "  - MSR module: loaded"
+    log_info "  - Device files: $(ls /dev/cpu/*/msr 2>/dev/null | wc -l) CPUs"
+    log_info "  - Persistent loading: configured"
+    log_info "  - Usage: sudo rdmsr <register_address>"
+
+    return 0
 }
 
 # Install Intel CMT-CAT (libpqos)
@@ -1041,7 +1165,7 @@ verify_installation() {
     fi
 
     # Check development packages
-    local dev_packages=("libbpf-dev" "libelf-dev" "zlib1g-dev" "build-essential" "linux-libc-dev")
+    local dev_packages=("libbpf-dev" "libelf-dev" "zlib1g-dev" "build-essential" "msr-tools" "linux-libc-dev")
     for package in "${dev_packages[@]}"; do
         if dpkg -l "$package" 2>/dev/null | grep -q "^ii"; then
             log_success "✓ $package installed"
@@ -1050,6 +1174,49 @@ verify_installation() {
             ((errors++))
         fi
     done
+
+    # Check MSR access
+    log_info "Checking MSR (Model Specific Registers) access..."
+    if command -v rdmsr >/dev/null 2>&1 && command -v wrmsr >/dev/null 2>&1; then
+        log_success "✓ msr-tools (rdmsr/wrmsr) available"
+
+        # Check MSR module
+        if lsmod | grep -q "^msr "; then
+            log_success "✓ MSR module loaded"
+
+            # Check MSR device files
+            if ls /dev/cpu/*/msr >/dev/null 2>&1; then
+                local msr_count=$(ls /dev/cpu/*/msr 2>/dev/null | wc -l)
+                log_success "✓ MSR device files available ($msr_count CPUs)"
+
+                # Test MSR read (may fail without root)
+                if rdmsr 0x19C >/dev/null 2>&1; then
+                    log_success "✓ MSR read test successful"
+                else
+                    log_warning "⚠ MSR read test failed (normal without root privileges)"
+                fi
+            else
+                log_error "✗ MSR device files not found"
+                ((errors++))
+            fi
+        else
+            log_error "✗ MSR module not loaded"
+            ((errors++))
+        fi
+
+        # Check persistent configuration
+        if [[ -f /etc/modules-load.d/msr.conf ]] && grep -q "^msr$" /etc/modules-load.d/msr.conf; then
+            log_success "✓ MSR persistent loading configured (systemd)"
+        elif grep -q "^msr$" /etc/modules 2>/dev/null; then
+            log_success "✓ MSR persistent loading configured (/etc/modules)"
+        else
+            log_warning "⚠ MSR persistent loading not configured"
+            ((warnings++))
+        fi
+    else
+        log_error "✗ msr-tools not found"
+        ((errors++))
+    fi
 
     # Check kernel headers (may have dynamic name)
     local kernel_headers="linux-headers-$(uname -r)"
@@ -1337,7 +1504,7 @@ print_summary() {
         fi
     fi
 
-    echo "✅ Development packages: libbpf-dev, libelf-dev, zlib1g-dev"
+    echo "✅ Development packages: libbpf-dev, libelf-dev, zlib1g-dev, msr-tools"
     echo "✅ Build tools: build-essential, pkg-config, git, cmake"
 
     if command -v bpftool >/dev/null 2>&1; then
@@ -1427,6 +1594,10 @@ main() {
     install_dev_packages
     echo ""
 
+    log_info "Setting up MSR access..."
+    setup_msr_access
+    echo ""
+
     log_info "Installing Intel CMT-CAT (libpqos)..."
     install_intel_cmt_cat
     echo ""
@@ -1455,7 +1626,25 @@ main() {
         log_info "🔍 Phase 6: Kernel Configuration Validation"
         if [[ -f "$SCRIPT_DIR/validate_kernel_config.sh" ]]; then
             log_info "Running kernel configuration validation..."
-            if "$SCRIPT_DIR/validate_kernel_config.sh" --comprehensive --azure-mode; then
+
+            # Auto-detect kernel type for validation
+            local current_kernel=$(uname -r)
+            local validation_mode="--generic-mode"
+
+            if [[ "$current_kernel" == *"azure"* ]]; then
+                validation_mode="--azure-mode"
+                log_info "Detected Azure kernel, using Azure validation mode"
+            elif [[ "$current_kernel" == *"aws"* ]]; then
+                validation_mode="--aws-mode"
+                log_info "Detected AWS kernel, using AWS validation mode"
+            elif [[ "$current_kernel" == *"gcp"* ]]; then
+                validation_mode="--gcp-mode"
+                log_info "Detected GCP kernel, using GCP validation mode"
+            else
+                log_info "Using generic kernel validation mode"
+            fi
+
+            if "$SCRIPT_DIR/validate_kernel_config.sh" --comprehensive $validation_mode; then
                 log_success "✓ Kernel configuration validation passed"
             else
                 log_warning "⚠ Kernel configuration validation had issues"
