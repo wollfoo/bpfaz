@@ -1145,6 +1145,8 @@ int main(int argc, char **argv) {
     struct bpf_link *link = NULL;
     struct bpf_link *sched_link = NULL;
     struct bpf_link *psi_link = NULL;
+    struct bpf_link *cg_mk_link = NULL;
+    struct bpf_link *cg_destroy_link = NULL;
     struct bpf_program *prog;
     int err;
     int i;
@@ -1309,6 +1311,23 @@ int main(int argc, char **argv) {
         }
     }
     
+    /* ---------------- Cgroup tracepoints: auto-quota ---------------- */
+    if (skel->progs.on_cgroup_create) {
+        cg_mk_link = bpf_program__attach(skel->progs.on_cgroup_create);
+        if (!cg_mk_link && opt.verbose) {
+            fprintf(stderr, "Cảnh báo: Không thể gắn tracepoint cgroup_mkdir\n");
+        }
+    } else if (opt.verbose) {
+        fprintf(stderr, "Chương trình on_cgroup_create không tồn tại trong BPF object\n");
+    }
+
+    if (skel->progs.on_cgroup_destroy) {
+        cg_destroy_link = bpf_program__attach(skel->progs.on_cgroup_destroy);
+        if (!cg_destroy_link && opt.verbose) {
+            fprintf(stderr, "Cảnh báo: Không thể gắn tracepoint cgroup_destroy\n");
+        }
+    }
+    
     /* Pin maps nếu được yêu cầu */
     if (opt.pin_maps) {
         err = bpf_object__pin_maps(skel->obj, PIN_BASEDIR);
@@ -1435,6 +1454,8 @@ cleanup:
 #ifdef ENABLE_FENTRY_MSR
     if (msr_link) bpf_link__destroy(msr_link);
 #endif
+    if (cg_mk_link) bpf_link__destroy(cg_mk_link);
+    if (cg_destroy_link) bpf_link__destroy(cg_destroy_link);
     if (link) bpf_link__destroy(link);
     
     /* Destroy skeleton */
