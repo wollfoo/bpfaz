@@ -121,10 +121,16 @@ check_system_basics() {
     # OS version
     if grep -q "Ubuntu 22.04" /etc/os-release; then
         log_success "Ubuntu 22.04 detected"
-        log_detail "OS: $(lsb_release -d | cut -f2)"
+        if [[ "$DETAILED_MODE" == "true" ]]; then
+            local os_info=$(lsb_release -d 2>/dev/null | cut -f2 || grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
+            log_detail "OS: $os_info"
+        fi
     else
         log_error "Not Ubuntu 22.04 (compatibility may be limited)"
-        log_detail "Current OS: $(lsb_release -d | cut -f2 2>/dev/null || cat /etc/os-release | grep PRETTY_NAME)"
+        if [[ "$DETAILED_MODE" == "true" ]]; then
+            local current_os=$(lsb_release -d 2>/dev/null | cut -f2 || grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
+            log_detail "Current OS: $current_os"
+        fi
     fi
     
     # Kernel version with type detection
@@ -137,16 +143,24 @@ check_system_basics() {
         # Detect kernel type and provide specific feedback
         if [[ "$kernel_version" == *"generic"* ]]; then
             log_success "Kernel $kernel_version (HWE - Hardware Enablement)"
-            log_detail "HWE kernel provides enhanced BPF capabilities and latest hardware support"
+            if [[ "$DETAILED_MODE" == "true" ]]; then
+                log_detail "HWE kernel provides enhanced BPF capabilities and latest hardware support"
+            fi
         elif [[ "$kernel_version" == *"azure"* ]]; then
             log_success "Kernel $kernel_version (Azure-optimized)"
-            log_detail "Azure kernel optimized for cloud environments"
+            if [[ "$DETAILED_MODE" == "true" ]]; then
+                log_detail "Azure kernel optimized for cloud environments"
+            fi
         elif [[ "$kernel_version" == *"aws"* ]]; then
             log_success "Kernel $kernel_version (AWS-optimized)"
-            log_detail "AWS kernel optimized for EC2 environments"
+            if [[ "$DETAILED_MODE" == "true" ]]; then
+                log_detail "AWS kernel optimized for EC2 environments"
+            fi
         elif [[ "$kernel_version" == *"gcp"* ]]; then
             log_success "Kernel $kernel_version (GCP-optimized)"
-            log_detail "GCP kernel optimized for Google Cloud environments"
+            if [[ "$DETAILED_MODE" == "true" ]]; then
+                log_detail "GCP kernel optimized for Google Cloud environments"
+            fi
         else
             log_success "Kernel $kernel_version (>= 6.8 required)"
         fi
@@ -577,6 +591,55 @@ check_msr_access() {
     echo ""
 }
 
+# Check Intel RDT (Resource Director Technology) support
+check_intel_rdt() {
+    log_info "Checking Intel RDT (Resource Director Technology) support..."
+    ((MAX_SCORE += 3))
+
+    # Check CPU vendor
+    local cpu_vendor=$(lscpu | grep "Vendor ID" | awk '{print $3}' || echo "unknown")
+    if [[ "$cpu_vendor" == "GenuineIntel" ]]; then
+        log_success "Intel CPU detected (RDT potentially available)"
+        log_detail "CPU vendor: $cpu_vendor"
+    else
+        log_warning "Non-Intel CPU detected (RDT not available)"
+        log_detail "CPU vendor: $cpu_vendor - RDT is Intel-specific"
+        return 0
+    fi
+
+    # Check for pqos library
+    if [[ -f /usr/local/include/pqos.h ]] || [[ -f /usr/include/pqos.h ]]; then
+        log_success "Intel RDT library (pqos) found"
+        if [[ "$DETAILED_MODE" == "true" ]]; then
+            if [[ -f /usr/local/include/pqos.h ]]; then
+                log_detail "pqos.h location: /usr/local/include/pqos.h"
+            else
+                log_detail "pqos.h location: /usr/include/pqos.h"
+            fi
+        fi
+    else
+        log_warning "Intel RDT library (pqos) not found"
+        log_detail "RDT provides cache allocation and memory bandwidth monitoring"
+        if [[ "$FIX_ISSUES" == "true" ]]; then
+            log_info "Intel RDT is optional - install intel-cmt-cat if needed"
+        fi
+    fi
+
+    # Check resctrl filesystem
+    if [[ -d /sys/fs/resctrl ]]; then
+        log_success "Resctrl filesystem available"
+        if [[ "$DETAILED_MODE" == "true" ]]; then
+            local resctrl_info=$(mount | grep resctrl || echo "not mounted")
+            log_detail "Resctrl status: $resctrl_info"
+        fi
+    else
+        log_warning "Resctrl filesystem not available"
+        log_detail "Resctrl provides runtime cache and bandwidth control"
+    fi
+
+    echo ""
+}
+
 # Test compilation capability
 test_compilation() {
     log_info "Testing compilation capability..."
@@ -635,17 +698,31 @@ EOF
         log_warning "Advanced BPF features compilation failed"
     fi
 
-    # Test hide_process_bpf specific compilation
-    local hide_process_dir="$(dirname "$0")/.."
-    if [[ -f "$hide_process_dir/hide_process_bpf.c" ]]; then
-        cd "$hide_process_dir"
-        if make clean >/dev/null 2>&1 && make test >/dev/null 2>&1; then
-            log_success "hide_process_bpf compilation working"
+    # Test cpu_throttle_bpf specific compilation
+    local cpu_throttle_dir="$(dirname "$0")/../cpu_throttle_bpf"
+    if [[ -f "$cpu_throttle_dir/cpu_throttle_bpf.c" ]]; then
+        cd "$cpu_throttle_dir"
+        if make clean >/dev/null 2>&1 && make info >/dev/null 2>&1; then
+            log_success "cpu_throttle_bpf compilation working"
+            if [[ "$DETAILED_MODE" == "true" ]]; then
+                log_detail "cpu_throttle_bpf module compilation verified"
+            fi
         else
-            log_error "hide_process_bpf compilation failed"
+            log_error "cpu_throttle_bpf compilation failed"
         fi
     else
-        log_warning "hide_process_bpf.c not found - skipping specific test"
+        # Fallback to hide_process_bpf
+        local hide_process_dir="$(dirname "$0")/.."
+        if [[ -f "$hide_process_dir/hide_process_bpf.c" ]]; then
+            cd "$hide_process_dir"
+            if make clean >/dev/null 2>&1 && make test >/dev/null 2>&1; then
+                log_success "hide_process_bpf compilation working"
+            else
+                log_error "hide_process_bpf compilation failed"
+            fi
+        else
+            log_warning "BPF modules not found - skipping specific compilation test"
+        fi
     fi
 
     # Cleanup
@@ -702,11 +779,13 @@ generate_report() {
     echo ""
 
     if [[ $percentage -ge 90 ]]; then
-        echo "🟢 Status: EXCELLENT - Ready for hide_process_bpf compilation"
+        echo "🟢 Status: EXCELLENT - Ready for BPF module compilation"
         echo "✅ All critical components are properly configured"
+        echo "✅ MSR access and Intel RDT support verified"
     elif [[ $percentage -ge 75 ]]; then
         echo "🟡 Status: GOOD - Minor issues may affect compilation"
         echo "⚠️  Some non-critical components need attention"
+        echo "⚠️  MSR or RDT features may be limited"
     elif [[ $percentage -ge 50 ]]; then
         echo "🟠 Status: FAIR - Several issues need to be resolved"
         echo "❌ Critical components missing or misconfigured"
@@ -746,6 +825,9 @@ generate_report() {
     echo "   - Check system logs: journalctl -xe"
     echo "   - Verify kernel config: zcat /proc/config.gz | grep BPF"
     echo "   - Test BPF manually: bpftool prog list"
+    echo "   - Check MSR access: sudo rdmsr 0x19C"
+    echo "   - Load MSR module: sudo modprobe msr"
+    echo "   - Test compilation: cd cpu_throttle_bpf && make info"
     echo ""
 }
 
@@ -761,6 +843,8 @@ main() {
     check_dev_packages
     check_kernel_config
     check_bpf_infrastructure
+    check_msr_access
+    check_intel_rdt
     test_compilation
     check_system_resources
 
