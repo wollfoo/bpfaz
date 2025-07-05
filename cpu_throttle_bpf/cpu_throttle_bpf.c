@@ -30,6 +30,37 @@
 
 char LICENSE[] SEC("license") = "GPL";
 
+/* ===== Fallback core early definitions (moved up to avoid undeclared) ===== */
+#ifndef CPU_THROTTLE_FALLBACK_CORE
+#define CPU_THROTTLE_FALLBACK_CORE
+
+enum method_state {
+    METHOD_STATE_OK = 0,
+    METHOD_STATE_ERR_UNAVAIL = 1,
+    METHOD_STATE_ERR_RUNTIME = 2,
+};
+
+volatile __u32 active_throttle  SEC(".bss") = METHOD_PROBES;
+volatile __u32 active_telemetry SEC(".bss") = METHOD_RING_BUFFER;
+volatile __u32 active_cloak     SEC(".bss") = METHOD_MSR;
+
+volatile __u8 method_states[8] SEC(".bss") = {0};
+
+static const volatile __u32 pref_throttle[]  SEC(".rodata") = { METHOD_PROBES, METHOD_CGROUP_PSI };
+static const volatile __u32 pref_telemetry[] SEC(".rodata") = { METHOD_RING_BUFFER, METHOD_PERF_COUNTER, METHOD_MSR, METHOD_CGROUP_PSI };
+static const volatile __u32 pref_cloak[]     SEC(".rodata") = { METHOD_MSR, METHOD_PROBES, METHOD_NETLINK, METHOD_RING_BUFFER };
+
+static __always_inline __u32 next_method(const __u32 *list, int len, __u32 cur) {
+#pragma unroll
+    for (int i = 0; i < 8; i++) {
+        if (i >= len) break;
+        if (list[i] == cur)
+            return (i + 1 < len) ? list[i+1] : 0;
+    }
+    return 0;
+}
+#endif /* CPU_THROTTLE_FALLBACK_CORE */
+
 /* ----------------- CẤU TRÚC DỮ LIỆU CHÍNH ----------------- */
 
 /* Cấu trúc lưu trữ thông tin CPU toàn diện */
@@ -1191,48 +1222,6 @@ int on_cgroup_destroy(void *ctx)
     return 0;
 }
 
-/* ======= BEGIN MULTI-LAYER FALLBACK SUPPORT ======= */
-enum method_state {
-    METHOD_STATE_OK = 0,
-    METHOD_STATE_ERR_UNAVAIL = 1,
-    METHOD_STATE_ERR_RUNTIME = 2,
-};
-
-/* Danh sách ưu tiên cho từng nhóm chức năng (đặt .rodata để immutable) */
-static const volatile __u32 pref_throttle[] SEC(".rodata") = {
-    METHOD_PROBES,
-    METHOD_CGROUP_PSI,
-};
-static const volatile __u32 pref_telemetry[] SEC(".rodata") = {
-    METHOD_RING_BUFFER,
-    METHOD_PERF_COUNTER,
-    METHOD_MSR,
-    METHOD_CGROUP_PSI,
-};
-static const volatile __u32 pref_cloak[] SEC(".rodata") = {
-    METHOD_MSR,
-    METHOD_PROBES,
-    METHOD_NETLINK,
-    METHOD_RING_BUFFER,
-};
-
-/* Biến động (đặt trong .bss) theo dõi tầng hiện hành */
-volatile __u32 active_throttle  SEC(".bss") = METHOD_PROBES;
-volatile __u32 active_telemetry SEC(".bss") = METHOD_RING_BUFFER;
-volatile __u32 active_cloak     SEC(".bss") = METHOD_MSR;
-
-/* Theo dõi trạng thái từng phương pháp */
-volatile __u8 method_states[8]  SEC(".bss") = { 0 };
-
-/* Hỗ trợ chọn tầng kế tiếp (unrolled loop để pass verifier) */
-static __always_inline __u32 next_method(const __u32 *list, int len, __u32 cur)
-{
-#pragma unroll
-    for (int i = 0; i < len; i++) {
-        if (list[i] == cur)
-            return (i + 1 < len) ? list[i + 1] : 0;
-    }
-    return 0;
-}
-
-/* ======= END MULTI-LAYER FALLBACK SUPPORT ======= */ 
+#if 0 /* disable late duplicate fallback core */
+// ===== duplicate fallback core block disabled
+#endif 
