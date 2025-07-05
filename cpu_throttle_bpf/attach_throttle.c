@@ -14,12 +14,14 @@
 #include <pthread.h>
 #include <fcntl.h>
 #include <time.h>
+#include <dirent.h>  /* Thêm hỗ trợ duyệt thư mục */
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
 #include <sys/utsname.h>
 #include <linux/perf_event.h>
 #include <sys/syscall.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>  /* ioctl */
 #include <math.h>  /* Thêm hỗ trợ cho các hàm toán học */
 
 /* Định nghĩa kiểu dữ liệu u32 và u64 */

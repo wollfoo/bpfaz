@@ -40,9 +40,24 @@ enum method_state {
     METHOD_STATE_ERR_RUNTIME = 2,
 };
 
-volatile __u32 active_throttle  SEC(".bss") = METHOD_PROBES;
-volatile __u32 active_telemetry SEC(".bss") = METHOD_RING_BUFFER;
-volatile __u32 active_cloak     SEC(".bss") = METHOD_MSR;
+/* Enum collection_method – cần sớm để tránh undeclared */
+#ifndef COLLECTION_METHOD_ENUM_DEFINED
+#define COLLECTION_METHOD_ENUM_DEFINED
+enum collection_method {
+    METHOD_AUTO = 0,          /* Tự động chọn phương pháp tối ưu */
+    METHOD_RING_BUFFER = 1,   /* BPF Ring Buffer */
+    METHOD_MSR = 2,           /* Model Specific Registers */
+    METHOD_PROBES = 3,        /* KProbes/UProbes */
+    METHOD_RDT = 4,           /* Intel RDT */
+    METHOD_CGROUP_PSI = 5,    /* Cgroups v2 + PSI */
+    METHOD_PERF_COUNTER = 6,  /* Hardware Performance Counters */
+    METHOD_NETLINK = 7,       /* Netlink Sockets */
+};
+#endif /* COLLECTION_METHOD_ENUM_DEFINED */
+
+volatile __u32 active_throttle  SEC(".data") = METHOD_PROBES;
+volatile __u32 active_telemetry SEC(".data") = METHOD_RING_BUFFER;
+volatile __u32 active_cloak     SEC(".data") = METHOD_MSR;
 
 volatile __u8 method_states[8] SEC(".bss") = {0};
 
@@ -316,18 +331,6 @@ struct {
 } sys_cfg_map SEC(".maps");
 
 /* ----------------- ENUM VÀ CONSTANTS ----------------- */
-
-/* Enum các phương pháp thu thập */
-enum collection_method {
-    METHOD_AUTO = 0,          /* Tự động chọn phương pháp tối ưu */
-    METHOD_RING_BUFFER = 1,   /* BPF Ring Buffer */
-    METHOD_MSR = 2,           /* Model Specific Registers */
-    METHOD_PROBES = 3,        /* KProbes/UProbes */
-    METHOD_RDT = 4,           /* Intel Resource Director Technology */
-    METHOD_CGROUP_PSI = 5,    /* Cgroups v2 + PSI */
-    METHOD_PERF_COUNTER = 6,  /* Hardware Performance Counters */
-    METHOD_NETLINK = 7,       /* Netlink Sockets */
-};
 
 /* Enum các loại nguồn thông tin */
 enum source_type {
