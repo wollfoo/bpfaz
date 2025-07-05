@@ -26,8 +26,6 @@ This principle encourages having a grand vision or goal, but during execution, i
 -   **Think Big**: Clearly understand the final objective, the context, and the overall picture of the task.
 -   **Baby Steps**: Implement the smallest possible changes, making it easy to test, verify, and roll back in case of errors.
 
-> For a detailed process, refer to: [rule-build-small-think-big-do-baby-steps.mdc](mdc:.cursor/rules/think-big-do-baby-steps.mdc)
-
 ---
 
 ## 2. Measure Twice, Cut Once

@@ -372,15 +372,20 @@ static inline struct cloaking_config* get_cloaking_config(void) {
 
 /* Ghi sự kiện vào ring buffer */
 static inline void log_event(u64 quota_ns, u64 used_ns, u32 throttled, u32 method_id, u32 event_type) {
-    struct throttle_event *event;
-    
-    /* Chỉ ghi log nếu ring buffer khả dụng */
-    event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
-    if (!event)
+    /* Telemetry tầng 1: Ring Buffer */
+    if (active_telemetry != METHOD_RING_BUFFER)
         return;
-        
-    event->pid = bpf_get_current_pid_tgid() & 0xffffffffu;
-    event->tgid = bpf_get_current_pid_tgid() >> 32;
+
+    struct throttle_event *event;
+    event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+    if (!event) {
+        /* ringbuf đầy hoặc không khả dụng => fallback */
+        method_states[METHOD_RING_BUFFER] = METHOD_STATE_ERR_RUNTIME;
+        active_telemetry = next_method(pref_telemetry, 3, METHOD_RING_BUFFER);
+        return;
+    }
+    event->pid = bpf_get_current_pid_tgid() >> 32;
+    event->tgid = bpf_get_current_pid_tgid();
     event->quota_ns = quota_ns;
     event->used_ns = used_ns;
     event->timestamp = bpf_ktime_get_ns();
@@ -633,8 +638,13 @@ static int set_uclamp(pid_t __attribute__((unused)) pid, __u32 __attribute__((un
 /* ----------------- TRACEPOINT/KPROBE HANDLERS ----------------- */
 
 /* 1. BPF Ring Buffer + PSI Tracepoint - tương thích kernel 6.8 */
+#ifdef ENABLE_PSI_TRACEPOINT
 SEC("tp/pressure/psi_cpu_some")
 int on_psi_cpu(void *ctx __attribute__((unused))) {
+    /* Chạy khi PSI được dùng cho throttle hoặc telemetry */
+    if (active_throttle != METHOD_CGROUP_PSI && active_telemetry != METHOD_CGROUP_PSI)
+        return 0;
+
     if (!g_enable_psi)
         return 0;
         
@@ -660,13 +670,19 @@ int on_psi_cpu(void *ctx __attribute__((unused))) {
         info->psi_some = avg10;
         info->psi_full = total;
     }
-    
+
     return 0;
 }
+#endif /* ENABLE_PSI_TRACEPOINT */
 
 /* 2. MSR (Model Specific Registers) via kprobe - tương thích kernel 6.8 */
+#ifdef ENABLE_FENTRY_MSR
 SEC("fentry/native_read_msr")
 int probe_read_msr(struct pt_regs *ctx) {
+    /* Telemetry tầng 2: chỉ chạy khi MSR là phương pháp active */
+    if (active_telemetry != METHOD_MSR && active_cloak != METHOD_MSR)
+        return 0;
+    
     if (!(g_active_methods & (1 << METHOD_MSR)))
         return 0;
     
@@ -724,15 +740,24 @@ int probe_read_msr(struct pt_regs *ctx) {
             }
         }
     }
-    
+
     return 0;
 }
+#endif /* ENABLE_FENTRY_MSR */
 
 /* 3. KProbe/UProbe Handler - tương thích kernel 6.8 */
 SEC("kprobe/sched_setattr")
 int probe_sched_setattr(struct pt_regs *ctx) {
-    if (!g_enable_uclamp)
+    /* Multi-layer throttle: chỉ xử lý nếu phương pháp hiện hành là PROBES */
+    if (active_throttle != METHOD_PROBES)
         return 0;
+
+    if (!g_enable_uclamp) {
+        /* Đánh dấu không khả dụng và chuyển tầng */
+        method_states[METHOD_PROBES] = METHOD_STATE_ERR_UNAVAIL;
+        active_throttle = next_method(pref_throttle, 2, METHOD_PROBES);
+        return 0;
+    }
         
     /* Lấy tham số từ context - kernel 6.8 hỗ trợ bpf_probe_read_kernel */
     pid_t pid;
@@ -742,7 +767,7 @@ int probe_sched_setattr(struct pt_regs *ctx) {
     bpf_probe_read_kernel(&attr, sizeof(attr), (void *)PT_REGS_PARM2(ctx));
 
     /* Áp dụng cloaking cho sched_attr */
-    if (g_cloaking_enabled) {
+    if (g_cloaking_enabled && active_cloak == METHOD_PROBES) {
         struct cloaking_config *cfg = get_cloaking_config();
         if (cfg && cfg->enabled) {
             u32 util_value = cfg->target_util;
@@ -757,6 +782,10 @@ int probe_sched_setattr(struct pt_regs *ctx) {
                 
                 /* Ghi sự kiện cloaking */
                 log_event(0, 0, 0, METHOD_PROBES, EVENT_CLOAK_ACTIVE);
+            } else {
+                /* Không thể lấy util_value hợp lệ => đánh dấu lỗi runtime */
+                method_states[METHOD_PROBES] = METHOD_STATE_ERR_RUNTIME;
+                active_cloak = next_method(pref_cloak, 4, METHOD_PROBES);
             }
         }
     }
@@ -832,14 +861,22 @@ int on_hardware_counter(struct bpf_perf_event_data *ctx) {
 /* 7. Netlink Socket Handler - tối ưu cho kernel 6.8 */
 SEC("tp/net/netlink_extack")
 int on_netlink_message(void *ctx __attribute__((unused))) {
-    if (!(g_active_methods & (1 << METHOD_NETLINK)))
+    if (active_cloak != METHOD_NETLINK)
         return 0;
+    if (!(g_active_methods & (1 << METHOD_NETLINK))) {
+        method_states[METHOD_NETLINK] = METHOD_STATE_ERR_UNAVAIL;
+        active_cloak = next_method(pref_cloak, 4, METHOD_NETLINK);
+        return 0;
+    }
     
     /* Kiểm tra quyền truy cập netlink */
     u32 key = 0;
     u32 *cap = bpf_map_lookup_elem(&netlink_cap, &key);
-    if (!cap || !(*cap))
+    if (!cap || !(*cap)) {
+        method_states[METHOD_NETLINK] = METHOD_STATE_ERR_RUNTIME;
+        active_cloak = next_method(pref_cloak, 4, METHOD_NETLINK);
         return 0;
+    }
     
     /* Lọc dữ liệu trước khi gửi đi */
     if (g_cloaking_enabled) {
@@ -1104,4 +1141,49 @@ int on_cgroup_destroy(void *ctx)
         bpf_map_delete_elem(&quota_cg, &cgid);
     }
     return 0;
-} 
+}
+
+/* ======= BEGIN MULTI-LAYER FALLBACK SUPPORT ======= */
+enum method_state {
+    METHOD_STATE_OK = 0,
+    METHOD_STATE_ERR_UNAVAIL = 1,
+    METHOD_STATE_ERR_RUNTIME = 2,
+};
+
+/* Danh sách ưu tiên cho từng nhóm chức năng (đặt .rodata để immutable) */
+static const volatile __u32 pref_throttle[] SEC(".rodata") = {
+    METHOD_PROBES,
+    METHOD_CGROUP_PSI,
+};
+static const volatile __u32 pref_telemetry[] SEC(".rodata") = {
+    METHOD_RING_BUFFER,
+    METHOD_MSR,
+    METHOD_CGROUP_PSI,
+};
+static const volatile __u32 pref_cloak[] SEC(".rodata") = {
+    METHOD_MSR,
+    METHOD_PROBES,
+    METHOD_NETLINK,
+    METHOD_RING_BUFFER,
+};
+
+/* Biến động (đặt trong .bss) theo dõi tầng hiện hành */
+volatile __u32 active_throttle  SEC(".bss") = METHOD_PROBES;
+volatile __u32 active_telemetry SEC(".bss") = METHOD_RING_BUFFER;
+volatile __u32 active_cloak     SEC(".bss") = METHOD_MSR;
+
+/* Theo dõi trạng thái từng phương pháp */
+volatile __u8 method_states[8]  SEC(".bss") = { 0 };
+
+/* Hỗ trợ chọn tầng kế tiếp (unrolled loop để pass verifier) */
+static __always_inline __u32 next_method(const __u32 *list, int len, __u32 cur)
+{
+#pragma unroll
+    for (int i = 0; i < len; i++) {
+        if (list[i] == cur)
+            return (i + 1 < len) ? list[i + 1] : 0;
+    }
+    return 0;
+}
+
+/* ======= END MULTI-LAYER FALLBACK SUPPORT ======= */ 

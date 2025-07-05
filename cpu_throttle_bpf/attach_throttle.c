@@ -1254,9 +1254,10 @@ int main(int argc, char **argv) {
     }
 
     /* Gắn tracepoint PSI */
+#ifdef ENABLE_PSI_TRACEPOINT
     if (opt.use_psi) {
         struct bpf_program *prog = NULL;
-        
+
         /* Tìm chương trình on_psi_cpu nếu có */
         prog = bpf_object__find_program_by_name(skel->obj, "on_psi_cpu");
         if (prog) {
@@ -1277,14 +1278,26 @@ int main(int argc, char **argv) {
     } else {
         methods[METHOD_CGROUP_PSI].available = false;
     }
+#else
+    if (opt.verbose && opt.use_psi) {
+        printf("⚠ PSI tracepoint disabled (not available), using /proc/pressure/cpu instead\n");
+    }
+    methods[METHOD_CGROUP_PSI].available = false;
+#endif
     
     struct bpf_link *msr_link = NULL;
+#ifdef ENABLE_FENTRY_MSR
     if (opt.use_msr && skel->progs.probe_read_msr) {
         msr_link = bpf_program__attach(skel->progs.probe_read_msr);
         if (!msr_link && opt.verbose) {
             fprintf(stderr, "Cảnh báo: Không thể gắn kprobe native_read_msr\n");
         }
     }
+#else
+    if (opt.verbose && opt.use_msr) {
+        printf("⚠ MSR probe disabled (fentry not available)\n");
+    }
+#endif
     
     struct bpf_link *perf_link = NULL;
     if (opt.use_perf && skel->progs.on_hardware_counter) {
@@ -1399,7 +1412,9 @@ cleanup:
     
     /* Destroy các bpf_link */
     if (perf_link) bpf_link__destroy(perf_link);
+#ifdef ENABLE_FENTRY_MSR
     if (msr_link) bpf_link__destroy(msr_link);
+#endif
     if (link) bpf_link__destroy(link);
     
     /* Destroy skeleton */
