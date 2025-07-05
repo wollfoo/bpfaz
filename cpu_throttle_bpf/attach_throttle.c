@@ -1353,8 +1353,13 @@ int main(int argc, char **argv) {
                     snprintf(path, sizeof(path), "%s/%s", PIN_BASEDIR, de->d_name);
                     int mfd = bpf_obj_get(path);
                     if (mfd >= 0) {
-                        bpf_map_freeze(mfd);
-                        if (opt.debug) printf("Freeze map %s\n", de->d_name);
+                        if (strcmp(de->d_name, "quota_cg") != 0) {
+                            bpf_map_freeze(mfd);
+                            if (opt.debug)
+                                printf("Freeze map %s\n", de->d_name);
+                        } else if (opt.debug) {
+                            printf("Giữ map %s ở chế độ RW (auto-quota)\n", de->d_name);
+                        }
                         close(mfd);
                     }
                 }
