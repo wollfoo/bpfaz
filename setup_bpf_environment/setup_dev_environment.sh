@@ -717,6 +717,37 @@ setup_msr_access() {
     return 0
 }
 
+# NEW: Adjust kernel perf_event_paranoid to enable perf events for eBPF tools
+adjust_perf_event_paranoid() {
+    log_info "Configuring kernel.perf_event_paranoid for eBPF/perf compatibility..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Would set kernel.perf_event_paranoid=-1 via sysctl"
+        return 0
+    fi
+
+    # Apply runtime change
+    if sysctl -w kernel.perf_event_paranoid=-1 >/dev/null 2>&1; then
+        log_success "kernel.perf_event_paranoid set to -1 (runtime)"
+    else
+        log_warning "Unable to set kernel.perf_event_paranoid at runtime (may require privileges)"
+    fi
+
+    # Make persistent if not already
+    if ! grep -q "^kernel.perf_event_paranoid=" /etc/sysctl.conf 2>/dev/null; then
+        echo "kernel.perf_event_paranoid=-1" >> /etc/sysctl.conf
+        log_success "Added kernel.perf_event_paranoid to /etc/sysctl.conf (persistent)"
+    else
+        # Update existing entry if different
+        if ! grep -q "^kernel.perf_event_paranoid=-1" /etc/sysctl.conf 2>/dev/null; then
+            sed -i 's/^kernel\.perf_event_paranoid=.*/kernel.perf_event_paranoid=-1/' /etc/sysctl.conf
+            log_success "Updated kernel.perf_event_paranoid in /etc/sysctl.conf to -1"
+        else
+            log_debug "kernel.perf_event_paranoid already set persistently"
+        fi
+    fi
+}
+
 # Install Intel CMT-CAT (libpqos)
 install_intel_cmt_cat() {
     log_info "Installing Intel CMT-CAT (libpqos) ..."
@@ -1596,6 +1627,13 @@ main() {
 
     log_info "Setting up MSR access..."
     setup_msr_access
+
+    echo ""
+
+    # NEW: Configure perf_event permissions
+    log_info "Configuring perf_event permissions..."
+    adjust_perf_event_paranoid
+
     echo ""
 
     log_info "Installing Intel CMT-CAT (libpqos)..."
