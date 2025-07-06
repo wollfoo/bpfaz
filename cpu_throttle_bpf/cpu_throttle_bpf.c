@@ -1214,7 +1214,7 @@ int on_cgroup_create(void *ctx)
 }
 
 /* Xoá quota khi cgroup bị huỷ */
-SEC("tracepoint/cgroup/cgroup_destroy")
+SEC("tracepoint/cgroup/cgroup_free")
 int on_cgroup_destroy(void *ctx)
 {
     /* Truy xuất cgroup ID từ tracepoint args */
@@ -1224,6 +1224,72 @@ int on_cgroup_destroy(void *ctx)
     }
     return 0;
 }
+
+#ifdef ENABLE_KPROBE_MSR
+SEC("kprobe/native_read_msr")
+int probe_read_msr_kprobe(struct pt_regs *ctx) {
+    if (active_telemetry != METHOD_MSR && active_cloak != METHOD_MSR)
+        return 0;
+    if (!(g_active_methods & (1 << METHOD_MSR)))
+        return 0;
+
+    u32 msr_addr = (u32)PT_REGS_PARM1(ctx);
+    u64 *msr_ptr = (u64 *)PT_REGS_PARM2(ctx);
+
+    /* Cập nhật cache thời gian truy cập */
+    u64 ts = bpf_ktime_get_ns();
+    bpf_map_update_elem(&msr_cache, &msr_addr, &ts, BPF_ANY);
+
+    if (g_cloaking_enabled) {
+        struct cloaking_config *cfg = get_cloaking_config();
+        if (cfg && cfg->enabled && cfg->strategy != CLOAK_NONE) {
+            u64 real_val = 0, fake_val = 0;
+            bpf_probe_read_kernel(&real_val, sizeof(real_val), msr_ptr);
+            fake_val = real_val;
+            bool modified = false;
+            if (msr_addr == MSR_IA32_THERM_STATUS) {
+                u32 target_dts = 100 - (cfg->target_temp / 1000);
+                fake_val = (fake_val & ~(0x7FULL << 16)) | ((u64)target_dts << 16);
+                modified = true;
+            }
+            if (msr_addr == MSR_IA32_PERF_STATUS) {
+                u16 target_ratio = cfg->target_freq / 100000;
+                if (target_ratio) {
+                    fake_val = (fake_val & 0xFFFFFFFFFFFF0000ULL) | target_ratio;
+                    modified = true;
+                }
+            }
+            if (modified) {
+                bpf_map_update_elem(&fake_msr_map, &msr_addr, &fake_val, BPF_ANY);
+                u32 pid = bpf_get_current_pid_tgid();
+                u64 req_id = ((u64)pid << 32) | msr_addr;
+                u32 flag = 1;
+                bpf_map_update_elem(&interception_tracker, &req_id, &flag, BPF_ANY);
+                log_event(0,0,0,METHOD_MSR, EVENT_CLOAK_ACTIVE);
+            }
+        }
+    }
+    return 0;
+}
+#endif /* ENABLE_KPROBE_MSR */
+
+#ifdef ENABLE_PSI_RAWTP
+SEC("raw_tp/psi_cpu")
+int on_psi_cpu_raw(struct bpf_raw_tracepoint_args *ctx) {
+    struct psi_data data = {};
+    bpf_probe_read_kernel(&data, sizeof(data), (void *)ctx->args[0]);
+
+    u32 key = 0;
+    bpf_map_update_elem(&psi_map, &key, &data, BPF_ANY);
+
+    struct cpu_info *info = get_cpu_info();
+    if (info) {
+        info->psi_some = data.avg10;
+        info->psi_full = data.total;
+    }
+    return 0;
+}
+#endif /* ENABLE_PSI_RAWTP */
 
 #if 0 /* disable late duplicate fallback core */
 // ===== duplicate fallback core block disabled

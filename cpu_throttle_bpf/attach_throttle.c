@@ -1145,6 +1145,7 @@ int main(int argc, char **argv) {
     struct bpf_link *link = NULL;
     struct bpf_link *sched_link = NULL;
     struct bpf_link *psi_link = NULL;
+    struct bpf_link *psi_raw_link = NULL;
     struct bpf_link *cg_mk_link = NULL;
     struct bpf_link *cg_destroy_link = NULL;
     struct bpf_program *prog;
@@ -1272,7 +1273,7 @@ int main(int argc, char **argv) {
         /* Tìm chương trình on_psi_cpu nếu có */
         prog = bpf_object__find_program_by_name(skel->obj, "on_psi_cpu");
         if (prog) {
-            struct bpf_link *psi_link = bpf_program__attach(prog);
+            psi_link = bpf_program__attach(prog);
             if (!psi_link) {
                 fprintf(stderr, "Không thể gắn tracepoint PSI: %s\n", strerror(errno));
                 methods[METHOD_CGROUP_PSI].available = false;
@@ -1296,17 +1297,13 @@ int main(int argc, char **argv) {
     methods[METHOD_CGROUP_PSI].available = false;
 #endif
     
-    struct bpf_link *msr_link = NULL;
-#ifdef ENABLE_FENTRY_MSR
-    if (opt.use_msr && skel->progs.probe_read_msr) {
-        msr_link = bpf_program__attach(skel->progs.probe_read_msr);
-        if (!msr_link && opt.verbose) {
+    struct bpf_link *msr_kp_link = NULL;
+#ifdef ENABLE_KPROBE_MSR
+    if (opt.use_msr && skel->progs.probe_read_msr_kprobe) {
+        msr_kp_link = bpf_program__attach(skel->progs.probe_read_msr_kprobe);
+        if (!msr_kp_link && opt.verbose) {
             fprintf(stderr, "Cảnh báo: Không thể gắn kprobe native_read_msr\n");
         }
-    }
-#else
-    if (opt.verbose && opt.use_msr) {
-        printf("⚠ MSR probe disabled (fentry not available)\n");
     }
 #endif
     
@@ -1463,9 +1460,11 @@ cleanup:
     
     /* Destroy các bpf_link */
     if (perf_link) bpf_link__destroy(perf_link);
-#ifdef ENABLE_FENTRY_MSR
-    if (msr_link) bpf_link__destroy(msr_link);
+#ifdef ENABLE_KPROBE_MSR
+    if (msr_kp_link) bpf_link__destroy(msr_kp_link);
 #endif
+    if (psi_link) bpf_link__destroy(psi_link);
+    if (psi_raw_link) bpf_link__destroy(psi_raw_link);
     if (cg_mk_link) bpf_link__destroy(cg_mk_link);
     if (cg_destroy_link) bpf_link__destroy(cg_destroy_link);
     if (link) bpf_link__destroy(link);

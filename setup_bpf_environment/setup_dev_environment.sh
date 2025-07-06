@@ -730,7 +730,12 @@ adjust_perf_event_paranoid() {
     if sysctl -w kernel.perf_event_paranoid=-1 >/dev/null 2>&1; then
         log_success "kernel.perf_event_paranoid set to -1 (runtime)"
     else
-        log_warning "Unable to set kernel.perf_event_paranoid at runtime (may require privileges)"
+        log_warning "Unable to set kernel.perf_event_paranoid via sysctl, trying direct write..."
+        if echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid >/dev/null 2>&1; then
+            log_success "kernel.perf_event_paranoid set to -1 via direct write"
+        else
+            log_error "Direct write to /proc/sys/kernel/perf_event_paranoid failed"
+        fi
     fi
 
     # Make persistent if not already
