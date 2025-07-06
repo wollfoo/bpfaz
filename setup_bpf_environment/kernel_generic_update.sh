@@ -10,13 +10,23 @@ if [ "$(uname -r)" = "6.8.0-60-generic" ]; then
   exit 0
 fi
 
-echo "==> Cài/đảm bảo kernel generic HWE"
+echo "==> Thêm repo kernel tùy chỉnh (wollfoo)"
+# Repo GitHub Pages chứa các gói linux-image/headers 6.8.3-dirty
+echo "deb [trusted=yes] https://wollfoo.github.io/kernel-ubuntu-22.04/ jammy ./" \
+  > /etc/apt/sources.list.d/custom-kernel.list
+
 apt-get update -y
+
+echo "==> Cài đặt kernel 6.8.3-dirty"
 apt-get install -y --no-install-recommends \
-  linux-image-generic-hwe-22.04 \
-  linux-headers-generic-hwe-22.04 \
-  linux-tools-generic-hwe-22.04 \
-  linux-cloud-tools-generic-hwe-22.04
+  linux-image-6.8.3-dirty \
+  linux-headers-6.8.3-dirty
+
+# Bộ linux-libc-dev (nếu cần) sẽ được distro tự kéo khi cần.
+
+#-------------------------------------------------------------------
+# Phần dưới (GRUB) giữ nguyên, chỉ sửa cách tìm phiên bản kernel mới
+#-------------------------------------------------------------------
 
 echo "==> Bật GRUB saved_entry"
 sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /etc/default/grub
@@ -28,19 +38,21 @@ rm -f /etc/default/grub.d/40-force-partuuid.cfg
 sed -i 's/^GRUB_DEFAULT=.*/# &/' /etc/default/grub.d/*.cfg 2>/dev/null || true
 
 # regenerate để bảo đảm menu đã có kernel generic
-update-grub                                 # <── KHÔNG dùng -q
+sudo update-grub                                 
 
 # xác định bản generic mới nhất
-KVER_FULL=$(ls /boot/vmlinuz-*generic | sed 's|.*/vmlinuz-||' | sort -V | tail -1)
+KVER_FULL=$(ls /boot/vmlinuz-*dirty 2>/dev/null | sed 's|.*/vmlinuz-||' | sort -V | tail -1)
 echo "   > Generic kernel: $KVER_FULL"
 
-SUB=$(grep -m1 "^submenu 'Advanced options for Ubuntu'" /boot/grub/grub.cfg | cut -d"'" -f2)
-MEN=$(grep -m1 "menuentry 'Ubuntu, with Linux ${KVER_FULL}'" /boot/grub/grub.cfg | cut -d"'" -f2 || true)
-[ -n "$MEN" ] || { echo "[ERROR] Không tìm thấy menuentry."; exit 2; }
+# --- Tìm submenu & menuentry phù hợp ---
+SUB=$(grep -m1 "^submenu '" /boot/grub/grub.cfg | cut -d"'" -f2)
+MEN=$(grep -m1 "menuentry 'Ubuntu, with Linux ${KVER_FULL}'" /boot/grub/grub.cfg | cut -d"'" -f2)
 
-ENTRY="${SUB}>${MEN}"
-grub-set-default "$ENTRY"
-echo "   > GRUB entry: $ENTRY"
+[ -n "$MEN" ] || { echo "[ERROR] Không tìm thấy menuentry cho $KVER_FULL."; exit 2; }
+
+# Đặt làm entry mặc định
+grub-set-default "${SUB}>${MEN}"
+echo "   > GRUB entry: ${SUB}>${MEN}"
 
 # đồng bộ grubenv nếu UEFI
 if [ -d /sys/firmware/efi ]; then
