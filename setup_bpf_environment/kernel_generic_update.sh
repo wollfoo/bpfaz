@@ -4,25 +4,30 @@ set -euo pipefail
 # Yêu cầu root
 [ "$(id -u)" -eq 0 ] || { echo "[ERROR] Phải chạy sudo/root."; exit 1; }
 
-# Kiểm tra nếu hệ thống đã chạy kernel 6.8.0-60-generic thì thoát
-if [ "$(uname -r)" = "6.8.0-60-generic" ]; then
-  echo "[OK] Hệ thống đang chạy kernel 6.8.0-60-generic. Không cần thay đổi, thoát script." >&2
+# Kiểm tra nếu hệ thống đã chạy kernel 6.6.58 thì thoát
+if [ "$(uname -r)" = "6.6.58" ]; then
+  echo "[OK] Hệ thống đang chạy kernel 6.6.58. Không cần thay đổi, thoát script." >&2
   exit 0
 fi
 
 echo "==> Thêm repo kernel tùy chỉnh (wollfoo)"
-# Repo GitHub Pages chứa các gói linux-image/headers 6.8.3-dirty
-echo "deb [trusted=yes] https://wollfoo.github.io/kernel-ubuntu-22.04/ jammy ./" \
-  > /etc/apt/sources.list.d/custom-kernel.list
+# CẢNH BÁO BẢO MẬT: Sử dụng [trusted=yes] bỏ qua GPG signature verification - RỦI RO CAO
+# Repo GitHub raw chứa các gói linux-image/libc-dev 6.6.58
+echo "deb [trusted=yes] https://raw.githubusercontent.com/wollfoo/linuxubuntu.22.04/main/ jammy main" \
+  > /etc/apt/sources.list.d/wollfoo-kernel.list
 
 apt-get update -y
 
-echo "==> Cài đặt kernel 6.8.3-dirty"
+echo "==> Cài đặt kernel 6.6.58"
 apt-get install -y --no-install-recommends \
-  linux-image-6.8.3-dirty \
-  linux-headers-6.8.3-dirty
+  linux-image-6.6.58 \
+  linux-libc-dev \
+  linux-tools-6.6.58 \
+  linux-cloud-tools-6.6.58
 
-# Bộ linux-libc-dev (nếu cần) sẽ được distro tự kéo khi cần.
+# linux-libc-dev cung cấp kernel headers cho userspace development
+# linux-tools-6.6.58 cung cấp perf, bpftool và các công cụ kernel debugging
+# linux-cloud-tools-6.6.58 cung cấp các công cụ cho cloud environments
 
 #-------------------------------------------------------------------
 # Phần dưới (GRUB) giữ nguyên, chỉ sửa cách tìm phiên bản kernel mới
@@ -40,8 +45,8 @@ sed -i 's/^GRUB_DEFAULT=.*/# &/' /etc/default/grub.d/*.cfg 2>/dev/null || true
 # regenerate để bảo đảm menu đã có kernel generic
 sudo update-grub                                 
 
-# xác định bản generic mới nhất
-KVER_FULL=$(ls /boot/vmlinuz-*dirty 2>/dev/null | sed 's|.*/vmlinuz-||' | sort -V | tail -1)
+# xác định bản generic mới nhất (tìm kernel 6.6.58)
+KVER_FULL=$(ls /boot/vmlinuz-6.6.58* 2>/dev/null | sed 's|.*/vmlinuz-||' | sort -V | tail -1)
 echo "   > Generic kernel: $KVER_FULL"
 
 # --- Tìm submenu & menuentry phù hợp ---
