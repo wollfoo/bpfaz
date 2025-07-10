@@ -1078,6 +1078,10 @@ static inline int pqos_fini(void) {
 }
 #endif
 
+#ifndef ENABLE_CGROUP_RAW_TP
+#define ENABLE_CGROUP_RAW_TP 1
+#endif
+
 static void parse_args(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0) {

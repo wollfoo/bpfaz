@@ -141,7 +141,7 @@ else ifeq ($(ARCH),x86)
 endif
 
 # Tùy chọn cho BPF
-BPF_CFLAGS = -g -D__TARGET_ARCH_$(ARCH) $(INCLUDES) $(RDT_FLAGS) $(SECCOMP_FLAGS) -DENABLE_PSI_TRACEPOINT -DENABLE_PSI_RAWTP -DENABLE_KPROBE_MSR
+BPF_CFLAGS = -g -D__TARGET_ARCH_$(ARCH) $(INCLUDES) $(RDT_FLAGS) $(SECCOMP_FLAGS) -DENABLE_PSI_TRACEPOINT -DENABLE_PSI_RAWTP -DENABLE_KPROBE_MSR -DENABLE_CGROUP_RAW_TP
 
 ifeq ($(HAS_BTF), 1)
     BPF_CFLAGS += -DHAS_BTF
@@ -166,6 +166,8 @@ endif
 # Thêm tùy chọn libbpf
 CFLAGS += $(COMMON_FLAGS)
 CFLAGS += $(FUSE3_FLAGS)
+# Bổ sung flag để build user-space với hỗ trợ cgroup tracepoint
+CFLAGS += -DENABLE_CGROUP_RAW_TP
 BPF_CFLAGS += $(COMMON_FLAGS)
 BPF_CFLAGS += -target bpf -D__BPF_TRACING__ -Wno-unused-value -Wno-pointer-sign -D__linux__ -Wno-compare-distinct-pointer-types -Wno-gnu-variable-sized-type-not-at-end -Wno-address-of-packed-member -Wno-tautological-compare -Wno-unknown-warning-option -fno-asynchronous-unwind-tables -Wunused
 
