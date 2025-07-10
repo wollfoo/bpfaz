@@ -1198,7 +1198,7 @@ const volatile u64 g_default_quota_ns = 120000000ULL; /* Hạn mức mặc đị
 
 /* Ghi quota mặc định khi cgroup được tạo */
 SEC("tracepoint/cgroup/cgroup_mkdir")
-int on_cgroup_create(void *ctx)
+int handle_cgroup_mkdir(struct trace_event_raw_cgroup_mkdir *ctx)
 {
     /* Truy xuất cgroup ID từ tracepoint args */
     u64 cgid;
@@ -1214,14 +1214,11 @@ int on_cgroup_create(void *ctx)
 }
 
 /* Xoá quota khi cgroup bị huỷ */
-SEC("tracepoint/cgroup/cgroup_free")
-int on_cgroup_destroy(void *ctx)
+SEC("tracepoint/cgroup/cgroup_rmdir")
+int handle_cgroup_rmdir(struct trace_event_raw_cgroup_rmdir *ctx)
 {
-    /* Truy xuất cgroup ID từ tracepoint args */
-    u64 cgid;
-    if (bpf_probe_read_kernel(&cgid, sizeof(cgid), ctx + 8) == 0) {
-        bpf_map_delete_elem(&quota_cg, &cgid);
-    }
+    u64 cgroup_id = ctx->cgroup_id;
+    bpf_map_delete_elem(&quota_cg, &cgroup_id);
     return 0;
 }
 
