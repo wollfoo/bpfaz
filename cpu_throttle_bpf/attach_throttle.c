@@ -1316,6 +1316,7 @@ int main(int argc, char **argv) {
     }
     
     /* ---------------- Cgroup tracepoints: auto-quota ---------------- */
+#if ENABLE_CGROUP_RAW_TP
     if (skel->progs.on_cgroup_create) {
         cg_mk_link = bpf_program__attach(skel->progs.on_cgroup_create);
         if (!cg_mk_link && opt.verbose) {
@@ -1331,6 +1332,11 @@ int main(int argc, char **argv) {
             fprintf(stderr, "Cảnh báo: Không thể gắn tracepoint cgroup_destroy\n");
         }
     }
+#else
+    if (opt.verbose) {
+        printf("[INFO] Cgroup tracepoints bị tắt (ENABLE_CGROUP_RAW_TP=0)\n");
+    }
+#endif
     
     /* Pin maps nếu được yêu cầu */
     if (opt.pin_maps) {

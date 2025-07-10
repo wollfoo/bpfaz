@@ -1196,13 +1196,28 @@ const volatile u64 g_default_quota_ns = 120000000ULL; /* Hạn mức mặc đị
 
 /* =================== AUTO QUOTA FOR CONTAINERS =================== */
 
-/* Ghi quota mặc định khi cgroup được tạo */
+/*  Nếu kernel không cung cấp định nghĩa đầy đủ cho struct trace_event_raw_cgroup_mkdir/rmdir
+ *  (thường gặp trên kernel >= 6.8 với BTF tối giản), ta cho phép vô hiệu hoá phần
+ *  logic này bằng macro ENABLE_CGROUP_RAW_TP. Giá trị mặc định = 0 (tắt) để bảo
+ *  đảm biên dịch thành công. Người dùng có thể bật lại khi cần. */
+#define ENABLE_CGROUP_RAW_TP 1
+
+#if ENABLE_CGROUP_RAW_TP
+/* ==== Cgroup mkdir ==== */
 SEC("tracepoint/cgroup/cgroup_mkdir")
-int handle_cgroup_mkdir(struct trace_event_raw_cgroup_mkdir *ctx)
+int handle_cgroup_mkdir(void *ctx)
 {
-    /* Truy xuất cgroup ID từ tracepoint args */
-    u64 cgid;
-    if (bpf_probe_read_kernel(&cgid, sizeof(cgid), ctx + 8) == 0) {
+    /*
+     *  struct trace_event_raw_cgroup_mkdir không được BTF export đầy đủ ở kernel ≥ 6.8.
+     *  Do ta chỉ cần cgroup_id (u64) – field đầu tiên ngay sau struct trace_entry –
+     *  ta dùng phép tính offset 8 byte (sizeof(struct trace_entry)).
+     */
+    u64 cgid = 0;
+    char *p = (char *)ctx;
+    /* field id nằm tại offset 8 */
+    bpf_probe_read_kernel(&cgid, sizeof(cgid), p + 8);
+
+    if (cgid) {
         u64 default_q = g_default_quota_ns;
         u32 zero = 0;
         u64 *cfg_q = bpf_map_lookup_elem(&sys_cfg_map, &zero);
@@ -1213,14 +1228,21 @@ int handle_cgroup_mkdir(struct trace_event_raw_cgroup_mkdir *ctx)
     return 0;
 }
 
-/* Xoá quota khi cgroup bị huỷ */
+/* ==== Cgroup rmdir ==== */
 SEC("tracepoint/cgroup/cgroup_rmdir")
-int handle_cgroup_rmdir(struct trace_event_raw_cgroup_rmdir *ctx)
+int handle_cgroup_rmdir(void *ctx)
 {
-    u64 cgroup_id = ctx->cgroup_id;
-    bpf_map_delete_elem(&quota_cg, &cgroup_id);
+    u64 cgid = 0;
+    char *p = (char *)ctx;
+    bpf_probe_read_kernel(&cgid, sizeof(cgid), p + 8);
+    if (cgid)
+        bpf_map_delete_elem(&quota_cg, &cgid);
     return 0;
 }
+#else /* ENABLE_CGROUP_RAW_TP == 0 */
+/* Fallback: Bỏ qua tracepoint cgroup để tương thích kernel không có BTF chi
+ * tiết. Module vẫn hoạt động với quota mặc định hoặc cập nhật từ userspace. */
+#endif /* ENABLE_CGROUP_RAW_TP */
 
 #ifdef ENABLE_KPROBE_MSR
 SEC("kprobe/native_read_msr")

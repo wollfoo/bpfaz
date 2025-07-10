@@ -19,6 +19,12 @@ info()  { echo -e "\e[32m[INFO]\e[0m $*"; }
 warn()  { echo -e "\e[33m[WARN]\e[0m $*"; }
 error() { echo -e "\e[31m[ERR ]\e[0m $*"; }
 
+# Kiểm tra quyền root; nếu chưa phải root, tự gọi lại qua sudo
+if [[ $EUID -ne 0 ]]; then
+  echo -e "\e[33m[WARN]\e[0m Script không chạy với quyền root. Tự chuyển qua sudo..."
+  exec sudo "$0" "$@"
+fi
+
 # 1. Dừng loader nếu còn
 if pgrep -f "$LOADER_PATTERN" >/dev/null 2>&1; then
   info "Dừng tiến trình $LOADER_PATTERN..."
