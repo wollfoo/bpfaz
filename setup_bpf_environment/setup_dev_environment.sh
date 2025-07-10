@@ -807,7 +807,22 @@ install_intel_cmt_cat() {
 
     # Verify installation
     if ! ldconfig -p | grep -q "libpqos.so"; then
-        error_exit "libpqos not detected after installation"
+        # Refresh linker cache to include /usr/local/lib (nơi make install thường đặt libpqos)
+        ldconfig
+
+        # Fallback: nếu ldconfig chưa thấy, thêm /usr/local/lib vào ld.so.conf.d rồi làm mới
+        if ! ldconfig -p | grep -q "libpqos.so"; then
+            if ls /usr/local/lib/libpqos.so* >/dev/null 2>&1; then
+                log_info "libpqos nằm trong /usr/local/lib – thêm vào ld.so.conf.d và làm mới cache"
+                echo "/usr/local/lib" > /etc/ld.so.conf.d/libpqos.conf
+                ldconfig
+            fi
+        fi
+
+        # Verify installation lần cuối
+        if ! ldconfig -p | grep -q "libpqos.so"; then
+            error_exit "libpqos not detected after installation (đã thử fallback)"
+        fi
     fi
     log_success "libpqos library available"
 }
