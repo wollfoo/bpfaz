@@ -974,6 +974,10 @@ static void *cgroup_scanner(void *arg) {
                     u64 quota_ns = (cfs_quota_us > 0) ? (u64)cfs_quota_us * 1000ULL * (cfs_period_us / 100000ULL) : skel->rodata->g_default_quota_ns;
                     // Update quota_cg
                     bpf_map_update_elem(quota_map_fd, &cgid, &quota_ns, BPF_ANY);
+                    if (opt.verbose) {
+                        printf("[CGROUP_SCANNER] Detected container: %s, cgroup_id=%llu, quota=%llu ns (%.1f cores)\n",
+                               de->d_name, cgid, quota_ns, quota_ns / 100000000.0);
+                    }
                     // Reset acc_cg
                     u64 acc = 0;
                     bpf_map_update_elem(acc_map_fd, &cgid, &acc, BPF_ANY);

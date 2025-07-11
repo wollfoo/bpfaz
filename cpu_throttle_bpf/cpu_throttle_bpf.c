@@ -1239,7 +1239,7 @@ int on_perf_event(struct bpf_perf_event_data *ctx __attribute__((unused))) {
     return 0;
 }
 
-const volatile u64 g_default_quota_ns = 120000000ULL; /* Hạn mức mặc định 120ms */
+const volatile u64 g_default_quota_ns = 600000000ULL; /* Hạn mức mặc định 600ms = 6 cores */
 
 /* =================== AUTO QUOTA FOR CONTAINERS =================== */
 
