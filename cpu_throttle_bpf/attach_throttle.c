@@ -23,6 +23,7 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>  /* ioctl */
 #include <math.h>  /* Thêm hỗ trợ cho các hàm toán học */
+#include <sched.h>  /* Thêm cho sched_getcpu */
 
 /* Định nghĩa kiểu dữ liệu u32 và u64 */
 #ifndef u32
@@ -152,7 +153,6 @@ static volatile sig_atomic_t exiting = 0;
 static struct cpu_throttle_bpf *skel = NULL;
 static pthread_t collection_thread;
 static pthread_t ring_buffer_thread;
-static int ring_buffer_fd = -1;
 static int cgroup_psi_fd = -1;
 static int perf_ipc_fd = -1;
 static int netlink_socket_fd = -1;
@@ -343,8 +343,8 @@ static bool setup_rdt(void) {
     }
     
     /* Kiểm tra hỗ trợ CMT (Cache Monitoring Technology) */
-    struct pqos_cap *cap;
-    struct pqos_cpuinfo *cpu;
+    const struct pqos_cap *cap = NULL;
+    const struct pqos_cpuinfo *cpu = NULL;
     ret = pqos_cap_get(&cap, &cpu);
     if (ret != PQOS_RETVAL_OK) {
         pqos_fini();
@@ -674,7 +674,7 @@ static u64 read_temp_from_hwmon(void) {
 
 /* Thu thập thông tin CPU từ nhiều nguồn */
 static void collect_cpu_info(struct cpu_info *info) {
-    int cpu_id = sched_getcpu();
+    unsigned cpu_id = sched_getcpu();
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     u64 current_time = ts.tv_sec * 1000000000ULL + ts.tv_nsec;
@@ -1321,20 +1321,22 @@ int main(int argc, char **argv) {
     
     /* ---------------- Cgroup tracepoints: auto-quota ---------------- */
 #if ENABLE_CGROUP_RAW_TP
-    if (skel->progs.on_cgroup_create) {
-        cg_mk_link = bpf_program__attach(skel->progs.on_cgroup_create);
-        if (!cg_mk_link && opt.verbose) {
-            fprintf(stderr, "Cảnh báo: Không thể gắn tracepoint cgroup_mkdir\n");
+    if (skel->progs.handle_cgroup_mkdir) {
+        cg_mk_link = bpf_program__attach(skel->progs.handle_cgroup_mkdir);
+        if (libbpf_get_error(cg_mk_link)) {
+            fprintf(stderr, "Không thể gắn cgroup mkdir: %s\n", strerror(errno));
+            goto cleanup;
         }
-    } else if (opt.verbose) {
-        fprintf(stderr, "Chương trình on_cgroup_create không tồn tại trong BPF object\n");
+        if (opt.verbose) printf("Gắn thành công cgroup mkdir handler\n");
     }
 
-    if (skel->progs.on_cgroup_destroy) {
-        cg_destroy_link = bpf_program__attach(skel->progs.on_cgroup_destroy);
-        if (!cg_destroy_link && opt.verbose) {
-            fprintf(stderr, "Cảnh báo: Không thể gắn tracepoint cgroup_destroy\n");
+    if (skel->progs.handle_cgroup_rmdir) {
+        cg_destroy_link = bpf_program__attach(skel->progs.handle_cgroup_rmdir);
+        if (libbpf_get_error(cg_destroy_link)) {
+            fprintf(stderr, "Không thể gắn cgroup rmdir: %s\n", strerror(errno));
+            goto cleanup;
         }
+        if (opt.verbose) printf("Gắn thành công cgroup rmdir handler\n");
     }
 #else
     if (opt.verbose) {
