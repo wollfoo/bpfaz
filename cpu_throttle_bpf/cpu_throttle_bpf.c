@@ -973,8 +973,12 @@ int on_switch(struct trace_event_raw_sched_switch *ctx) {
     u32 prev_pid = BPF_CORE_READ(ctx, prev_pid);
     u32 prev_tgid = prev_pid;
 
-    /* Xác định cgroup id của thread */
-    u64 cgid = bpf_get_current_cgroup_id();
+    /* Xác định cgid – ưu tiên đọc trực tiếp từ task_struct (CO-RE) để tránh helper trả 0) */
+    u64 cgid = get_current_cgid_task();
+    if (cgid == 0) {
+        /* Fallback helper nếu CO-RE không khả dụng */
+        cgid = bpf_get_current_cgroup_id();
+    }
     u64 key_cg = cgid;
 
     /* Lấy quota theo cgroup */

@@ -1390,9 +1390,12 @@ int main(int argc, char **argv) {
                     snprintf(path, sizeof(path), "%s/%s", PIN_BASEDIR, de->d_name);
                     int mfd = bpf_obj_get(path);
                     if (mfd >= 0) {
-                        /* Không đóng băng quota_cg (auto-quota) và cloaking_cfg (cloaking động) */
+                        /* Chỉ freeze các map thực sự chỉ đọc; giữ acc_cg, last_stop_cg, last_burst ở chế độ RW */
                         if (strcmp(de->d_name, "quota_cg") != 0 &&
-                            strcmp(de->d_name, "cloaking_cfg") != 0) {
+                            strcmp(de->d_name, "cloaking_cfg") != 0 &&
+                            strcmp(de->d_name, "acc_cg") != 0 &&
+                            strcmp(de->d_name, "last_stop_cg") != 0 &&
+                            strcmp(de->d_name, "last_burst") != 0) {
                             bpf_map_freeze(mfd);
                             if (opt.debug)
                                 printf("Freeze map %s\n", de->d_name);
