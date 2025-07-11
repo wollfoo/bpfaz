@@ -1024,8 +1024,10 @@ int on_switch(struct trace_event_raw_sched_switch *ctx) {
 
     /* Lấy quota theo cgroup */
     u64 *quota_ns = bpf_map_lookup_elem(&quota_cg, &key_cg);
-    if (!quota_ns)
+    if (!quota_ns) {
+        bpf_printk("UNKNOWN_CGID %llu\n", key_cg);
         return 0; /* Không áp dụng cho cgroup này */
+    }
 
     /* Thu thập thông tin CPU hiện tại */
     collect_all_cpu_info();
