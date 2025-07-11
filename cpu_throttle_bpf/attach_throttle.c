@@ -943,6 +943,33 @@ static void *info_collection_thread(void *arg) {
     return NULL;
 }
 
+/* ==================== CGROUP SCANNER (cgroup v1 docker) ==================== */
+static void *cgroup_scanner(void *arg) {
+    const char *docker_cg_base = "/sys/fs/cgroup/cpu,cpuacct/docker"; // cgroup v1 path
+    int map_fd = skel && skel->maps.quota_cg ? bpf_map__fd(skel->maps.quota_cg) : -1;
+    if (map_fd < 0) return NULL;
+    while (!exiting) {
+        DIR *dir = opendir(docker_cg_base);
+        if (dir) {
+            struct dirent *de;
+            while ((de = readdir(dir)) != NULL) {
+                if (de->d_type != DT_DIR || de->d_name[0] == '.') continue;
+                char path[512];
+                snprintf(path, sizeof(path), "%s/%s", docker_cg_base, de->d_name);
+                struct stat st;
+                if (!stat(path, &st)) {
+                    u64 cgid = st.st_ino;
+                    u64 quota = skel->rodata->g_default_quota_ns;
+                    bpf_map_update_elem(map_fd, &cgid, &quota, BPF_NOEXIST);
+                }
+            }
+            closedir(dir);
+        }
+        sleep(5); /* quét mỗi 5 giây */
+    }
+    return NULL;
+}
+
 /* Cập nhật cấu hình cloaking */
 static void update_cloaking_config(void) {
     struct cloaking_config cfg = {
@@ -1419,6 +1446,11 @@ int main(int argc, char **argv) {
     if (pthread_create(&collection_thread, NULL, info_collection_thread, NULL)) {
         fprintf(stderr, "Cảnh báo: Không thể khởi động thread thu thập thông tin CPU\n");
     }
+
+    /* Khởi động thread quét cgroup (v1) */
+    if (pthread_create(&cg_scan_thread, NULL, cgroup_scanner, NULL)) {
+        fprintf(stderr, "Cảnh báo: Không thể khởi động thread cgroup scanner\n");
+    }
     
     /* Khởi động thread ring buffer nếu có */
     if (methods[METHOD_RING_BUFFER].available) {
@@ -1448,6 +1480,11 @@ cleanup:
     if (collection_thread) {
         pthread_cancel(collection_thread);
         pthread_join(collection_thread, NULL);
+    }
+    /* Dừng và giải phóng thread cgroup scanner */
+    if (cg_scan_thread) {
+        pthread_cancel(cg_scan_thread);
+        pthread_join(cg_scan_thread, NULL);
     }
     
     /* Giải phóng ring buffer */
