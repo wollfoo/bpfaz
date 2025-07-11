@@ -971,7 +971,7 @@ static void *cgroup_scanner(void *arg) {
                     f = fopen(period_path, "r");
                     if (f) { fscanf(f, "%lld", &cfs_period_us); fclose(f); }
                     // Compute quota_ns
-                    u64 quota_ns = (cfs_quota_us > 0) ? (u64)cfs_quota_us * 1000ULL : skel->rodata->g_default_quota_ns;
+                    u64 quota_ns = (cfs_quota_us > 0) ? (u64)cfs_quota_us * 1000ULL * (cfs_period_us / 100000ULL) : skel->rodata->g_default_quota_ns;
                     // Update quota_cg
                     bpf_map_update_elem(quota_map_fd, &cgid, &quota_ns, BPF_ANY);
                     // Reset acc_cg
@@ -1269,7 +1269,7 @@ int main(int argc, char **argv) {
     skel->rodata->g_cloaking_enabled = opt.cloaking_enabled;
     skel->rodata->g_cloaking_strategy = opt.cloaking_strategy;
     skel->rodata->g_collection_interval_ms = opt.collection_interval_ms;
-    skel->rodata->g_default_quota_ns = 120000000ULL;
+    skel->rodata->g_default_quota_ns = 600000000ULL;
     
     /* Cập nhật đường dẫn hwmon (dò tự động hoặc user cung cấp) */
     if (opt.hwmon_path[0]) {
