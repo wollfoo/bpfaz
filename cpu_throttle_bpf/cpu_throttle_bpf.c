@@ -30,22 +30,38 @@ static __always_inline u64 get_current_cgid_task(void)
     if (!task)
         return 0;
 
-    /* task->cgroups (struct css_set *) */
-    struct css_set *cs = BPF_CORE_READ(task, cgroups);
-    if (!cs)
+    struct css_set *css = BPF_CORE_READ(task, cgroups);
+    if (!css)
         return 0;
 
-    /* Cgroup v2: css_set->dfl_cgrp */
-    struct cgroup *cg = BPF_CORE_READ(cs, dfl_cgrp);
-    if (!cg)
-        return 0;
+    /* ---------- cgroup v2 ---------- */
+    struct cgroup *dfl = BPF_CORE_READ(css, dfl_cgrp);
+    if (dfl) {
+        struct kernfs_node *kn = BPF_CORE_READ(dfl, kn);
+        u64 id = BPF_CORE_READ(kn, id);
+        if (id)
+            return id;
+    }
 
-    struct kernfs_node *kn = BPF_CORE_READ(cg, kn);
-    if (!kn)
-        return 0;
+    /* ---------- cgroup v1 (CPU subsystem, index 3) ---------- */
+    struct cgroup_subsys_state **subs_ptr = BPF_CORE_READ(css, subsys);
+    if (subs_ptr) {
+        struct cgroup_subsys_state *css_cpu = NULL;
+        bpf_core_read(&css_cpu, sizeof(css_cpu), &subs_ptr[3]); /* constant index 3 */
+        if (css_cpu) {
+            struct cgroup *cg = BPF_CORE_READ(css_cpu, cgroup);
+            if (cg) {
+                struct kernfs_node *kn = BPF_CORE_READ(cg, kn);
+                if (kn) {
+                    u64 id = BPF_CORE_READ(kn, id);
+                    if (id)
+                        return id;
+                }
+            }
+        }
+    }
 
-    u64 id = BPF_CORE_READ(kn, id);
-    return id;
+    return 0; /* Caller sẽ fallback helper nếu cần */
 }
 
 /* Kernel version compatibility - điều chỉnh cho kernel 6.8.0 */
