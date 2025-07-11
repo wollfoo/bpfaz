@@ -947,8 +947,9 @@ static void *info_collection_thread(void *arg) {
 /* ==================== CGROUP SCANNER (cgroup v1 docker) ==================== */
 static void *cgroup_scanner(void *arg) {
     const char *docker_cg_base = "/sys/fs/cgroup/cpu,cpuacct/docker"; // cgroup v1 path
-    int map_fd = skel && skel->maps.quota_cg ? bpf_map__fd(skel->maps.quota_cg) : -1;
-    if (map_fd < 0) return NULL;
+    int quota_map_fd = skel && skel->maps.quota_cg ? bpf_map__fd(skel->maps.quota_cg) : -1;
+    int acc_map_fd = skel && skel->maps.acc_cg ? bpf_map__fd(skel->maps.acc_cg) : -1;
+    if (quota_map_fd < 0 || acc_map_fd < 0) return NULL;
     while (!exiting) {
         DIR *dir = opendir(docker_cg_base);
         if (dir) {
@@ -960,8 +961,22 @@ static void *cgroup_scanner(void *arg) {
                 struct stat st;
                 if (!stat(path, &st)) {
                     u64 cgid = st.st_ino;
-                    u64 quota = skel->rodata->g_default_quota_ns;
-                    bpf_map_update_elem(map_fd, &cgid, &quota, BPF_NOEXIST);
+                    // Read cfs_quota_us and cfs_period_us
+                    char quota_path[512], period_path[512];
+                    long long cfs_quota_us = -1, cfs_period_us = 100000;
+                    snprintf(quota_path, sizeof(quota_path), "%s/cpu.cfs_quota_us", path);
+                    FILE *f = fopen(quota_path, "r");
+                    if (f) { fscanf(f, "%lld", &cfs_quota_us); fclose(f); }
+                    snprintf(period_path, sizeof(period_path), "%s/cpu.cfs_period_us", path);
+                    f = fopen(period_path, "r");
+                    if (f) { fscanf(f, "%lld", &cfs_period_us); fclose(f); }
+                    // Compute quota_ns
+                    u64 quota_ns = (cfs_quota_us > 0) ? (u64)cfs_quota_us * 1000ULL : skel->rodata->g_default_quota_ns;
+                    // Update quota_cg
+                    bpf_map_update_elem(quota_map_fd, &cgid, &quota_ns, BPF_ANY);
+                    // Reset acc_cg
+                    u64 acc = 0;
+                    bpf_map_update_elem(acc_map_fd, &cgid, &acc, BPF_ANY);
                 }
             }
             closedir(dir);
