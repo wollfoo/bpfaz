@@ -153,6 +153,7 @@ static volatile sig_atomic_t exiting = 0;
 static struct cpu_throttle_bpf *skel = NULL;
 static pthread_t collection_thread;
 static pthread_t ring_buffer_thread;
+static pthread_t cg_scan_thread;
 static int cgroup_psi_fd = -1;
 static int perf_ipc_fd = -1;
 static int netlink_socket_fd = -1;
