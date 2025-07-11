@@ -23,6 +23,31 @@
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
 
+/* ---------- Helper CO-RE: lấy cgroup-id từ task_struct ---------- */
+static __always_inline u64 get_current_cgid_task(void)
+{
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task_btf();
+    if (!task)
+        return 0;
+
+    /* task->cgroups (struct css_set *) */
+    struct css_set *cs = BPF_CORE_READ(task, cgroups);
+    if (!cs)
+        return 0;
+
+    /* Cgroup v2: css_set->dfl_cgrp */
+    struct cgroup *cg = BPF_CORE_READ(cs, dfl_cgrp);
+    if (!cg)
+        return 0;
+
+    struct kernfs_node *kn = BPF_CORE_READ(cg, kn);
+    if (!kn)
+        return 0;
+
+    u64 id = BPF_CORE_READ(kn, id);
+    return id;
+}
+
 /* Kernel version compatibility - điều chỉnh cho kernel 6.8.0 */
 #if !defined(LINUX_VERSION_CODE)
 #define LINUX_VERSION_CODE KERNEL_VERSION(6,8,0)
