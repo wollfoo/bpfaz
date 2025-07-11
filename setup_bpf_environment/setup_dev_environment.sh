@@ -1603,6 +1603,46 @@ print_summary() {
     echo ""
 }
 
+# Setup coretemp sensor module for thermal readings
+setup_coretemp_sensor() {
+    log_info "Loading coretemp module for CPU temperature sensor..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Would run: modprobe coretemp"
+        return 0
+    fi
+
+    # Detect CPU vendor to decide correct module (Intel=coretemp, AMD=k10temp)
+    local cpu_vendor="$(lscpu | awk -F: '/Vendor ID/{print $2}' | xargs)"
+    local module_name="coretemp"
+    if [[ "$cpu_vendor" == *"AuthenticAMD"* ]]; then
+        module_name="k10temp"
+    fi
+
+    # Load module if not already
+    if lsmod | grep -q "^${module_name} "; then
+        log_success "${module_name} module already loaded"
+    else
+        if modprobe "$module_name"; then
+            log_success "${module_name} module loaded successfully"
+        else
+            log_warning "Unable to load ${module_name} module (may be unsupported on this platform)"
+            return 1
+        fi
+    fi
+
+    # Persist module loading
+    if [[ -d /etc/modules-load.d ]]; then
+        local cfg_file="/etc/modules-load.d/${module_name}.conf"
+        if ! grep -q "^${module_name}$" "$cfg_file" 2>/dev/null; then
+            echo "$module_name" > "$cfg_file"
+            log_success "Added ${module_name} to ${cfg_file} for persistent loading"
+        fi
+    fi
+
+    return 0
+}
+
 # Main execution function
 main() {
     # Initialize log file
@@ -1647,6 +1687,11 @@ main() {
 
     log_info "Setting up MSR access..."
     setup_msr_access
+
+    echo ""
+
+    log_info "Loading coretemp sensor module..."
+    setup_coretemp_sensor
 
     echo ""
 
