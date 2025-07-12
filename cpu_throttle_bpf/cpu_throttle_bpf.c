@@ -1249,10 +1249,9 @@ int on_switch(struct trace_event_raw_sched_switch *ctx) {
 
             set_uclamp(prev_pid, target_util);
 
-            if (opt.verbose) {
-                bpf_printk("CPU_LIMIT: PID=%u, overage=%llu%%, target_util=%u%%\n",
-                          prev_pid, overage_percent, target_util / 10);
-            }
+            /* Debug logging for dynamic quota throttling */
+            bpf_printk("CPU_LIMIT: PID=%u, overage=%llu%%, target_util=%u%%\n",
+                      prev_pid, overage_percent, target_util / 10);
         } else {
             /* Fallback: Sử dụng cgroup CPU limit */
             /* Điều này sẽ được handle bởi userspace cgroup scanner */
