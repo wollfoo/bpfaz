@@ -71,42 +71,68 @@ static __always_inline u64 get_current_cgid_task(void)
     return 0; /* Caller sẽ fallback helper nếu cần */
 }
 
-/* Alternative method: Get cgroup ID from previous task in context switch */
-static __always_inline u64 get_prev_task_cgid(struct trace_event_raw_sched_switch *ctx)
+/* Enhanced method: Get cgroup ID using multiple approaches for Docker containers */
+static __always_inline u64 get_container_cgid_enhanced(struct trace_event_raw_sched_switch *ctx)
 {
-    u32 prev_pid = BPF_CORE_READ(ctx, prev_pid);
-    if (prev_pid == 0) return 0;
+    /* Method 1: Try current task cgroup (most reliable for containers) */
+    struct task_struct *current_task = (struct task_struct *)bpf_get_current_task_btf();
+    if (current_task) {
+        struct css_set *css = BPF_CORE_READ(current_task, cgroups);
+        if (css) {
+            /* Try cgroup v1 CPU subsystem with multiple indices */
+            struct cgroup_subsys_state **subs_ptr = BPF_CORE_READ(css, subsys);
+            if (subs_ptr) {
+                int cpu_indices[] = {2, 3, 4, 5}; /* Extended range for Docker */
+                #pragma unroll
+                for (int i = 0; i < 4; i++) {
+                    struct cgroup_subsys_state *css_cpu = NULL;
+                    bpf_core_read(&css_cpu, sizeof(css_cpu), &subs_ptr[cpu_indices[i]]);
+                    if (css_cpu) {
+                        struct cgroup *cg = BPF_CORE_READ(css_cpu, cgroup);
+                        if (cg) {
+                            struct kernfs_node *kn = BPF_CORE_READ(cg, kn);
+                            if (kn) {
+                                u64 id = BPF_CORE_READ(kn, id);
+                                if (id && id > 1000) { /* Filter out system cgroups */
+                                    return id;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
-    /* Try to get task_struct from PID - this is more reliable for container processes */
-    struct task_struct *prev_task = (struct task_struct *)bpf_get_current_task_btf();
-    if (!prev_task) return 0;
-
-    struct css_set *css = BPF_CORE_READ(prev_task, cgroups);
-    if (!css) return 0;
-
-    /* Try cgroup v2 first */
-    struct cgroup *dfl = BPF_CORE_READ(css, dfl_cgrp);
-    if (dfl) {
-        struct kernfs_node *kn = BPF_CORE_READ(dfl, kn);
-        u64 id = BPF_CORE_READ(kn, id);
-        if (id) return id;
+            /* Try cgroup v2 as fallback */
+            struct cgroup *dfl = BPF_CORE_READ(css, dfl_cgrp);
+            if (dfl) {
+                struct kernfs_node *kn = BPF_CORE_READ(dfl, kn);
+                u64 id = BPF_CORE_READ(kn, id);
+                if (id && id > 1000) return id;
+            }
+        }
     }
 
-    /* Try cgroup v1 with multiple indices */
-    struct cgroup_subsys_state **subs_ptr = BPF_CORE_READ(css, subsys);
-    if (subs_ptr) {
-        int cpu_indices[] = {2, 3, 4};
-        #pragma unroll
-        for (int i = 0; i < 3; i++) {
-            struct cgroup_subsys_state *css_cpu = NULL;
-            bpf_core_read(&css_cpu, sizeof(css_cpu), &subs_ptr[cpu_indices[i]]);
-            if (css_cpu) {
-                struct cgroup *cg = BPF_CORE_READ(css_cpu, cgroup);
-                if (cg) {
-                    struct kernfs_node *kn = BPF_CORE_READ(cg, kn);
-                    if (kn) {
-                        u64 id = BPF_CORE_READ(kn, id);
-                        if (id) return id;
+    /* Method 2: Try previous task from context switch */
+    u32 prev_pid = BPF_CORE_READ(ctx, prev_pid);
+    if (prev_pid > 1000) { /* Only for user processes */
+        /* This method is less reliable but can provide alternative cgroup ID */
+        struct task_struct *prev_task = (struct task_struct *)bpf_get_current_task_btf();
+        if (prev_task) {
+            struct css_set *css = BPF_CORE_READ(prev_task, cgroups);
+            if (css) {
+                struct cgroup_subsys_state **subs_ptr = BPF_CORE_READ(css, subsys);
+                if (subs_ptr) {
+                    struct cgroup_subsys_state *css_cpu = NULL;
+                    bpf_core_read(&css_cpu, sizeof(css_cpu), &subs_ptr[3]); /* Standard CPU index */
+                    if (css_cpu) {
+                        struct cgroup *cg = BPF_CORE_READ(css_cpu, cgroup);
+                        if (cg) {
+                            struct kernfs_node *kn = BPF_CORE_READ(cg, kn);
+                            if (kn) {
+                                u64 id = BPF_CORE_READ(kn, id);
+                                if (id && id > 1000) return id;
+                            }
+                        }
                     }
                 }
             }
@@ -1066,22 +1092,22 @@ int on_switch(struct trace_event_raw_sched_switch *ctx) {
     u32 prev_pid = BPF_CORE_READ(ctx, prev_pid);
     u32 prev_tgid = prev_pid;
 
-    /* Xác định cgid – ưu tiên helper method vì chính xác hơn */
+    /* Xác định cgid – sử dụng enhanced detection cho Docker containers */
+    u64 cgid_enhanced = get_container_cgid_enhanced(ctx);
     u64 cgid_helper = bpf_get_current_cgroup_id();
     u64 cgid_core = get_current_cgid_task();
-    u64 cgid_prev = get_prev_task_cgid(ctx);
 
-    /* Ưu tiên helper method trước vì thường chính xác hơn cho containers */
-    u64 cgid = cgid_helper;
-    if (cgid == 0) cgid = cgid_core;
-    if (cgid == 0) cgid = cgid_prev;
+    /* Ưu tiên enhanced method cho containers, fallback to others */
+    u64 cgid = cgid_enhanced;
+    if (cgid == 0 || cgid < 1000) cgid = cgid_helper;
+    if (cgid == 0 || cgid < 1000) cgid = cgid_core;
 
     u64 key_cg = cgid;
 
     /* Debug logging - split into multiple calls due to bpf_printk limitations */
     if (prev_pid > 1000) { /* Chỉ log cho user processes */
         bpf_printk("DEBUG: PID=%u, final_cgid=%llu\n", prev_pid, cgid);
-        bpf_printk("  cgid_helper=%llu, cgid_prev=%llu\n", cgid_helper, cgid_prev);
+        bpf_printk("  enhanced=%llu, helper=%llu, core=%llu\n", cgid_enhanced, cgid_helper, cgid_core);
     }
 
     /* Lấy quota theo cgroup với fallback mechanism */
@@ -1090,21 +1116,28 @@ int on_switch(struct trace_event_raw_sched_switch *ctx) {
         /* Fallback: Try to find parent cgroup quota */
         u64 fallback_quota = 0;
 
-        /* Try common parent cgroup patterns for containers - focus on nearby ranges */
+        /* Intelligent cgroup mapping for Docker containers */
         u64 parent_candidates[] = {
-            32759,                   /* Known container cgroup from scanner */
+            /* Docker container cgroup patterns - common ranges */
+            key_cg + 6000, key_cg - 6000,  /* Typical Docker offset range */
             key_cg + 5000, key_cg - 5000,  /* Container range offsets */
-            key_cg + 1000, key_cg - 1000,  /* Medium range */
-            key_cg + 100, key_cg - 100,    /* Close range */
-            key_cg + 10, key_cg - 10,      /* Very close */
-            key_cg + 1, key_cg - 1,        /* Adjacent */
-            key_cg & 0xFFFFFF00,           /* Mask lower bits */
-            key_cg & 0xFFFFF000,           /* Mask more bits */
+            key_cg + 4000, key_cg - 4000,  /* Extended range */
+            key_cg + 3000, key_cg - 3000,  /* Medium-wide range */
+            key_cg + 2000, key_cg - 2000,  /* Medium range */
+            key_cg + 1000, key_cg - 1000,  /* Close range */
+            key_cg + 500, key_cg - 500,    /* Very close range */
+            key_cg + 100, key_cg - 100,    /* Adjacent range */
+            key_cg + 10, key_cg - 10,      /* Immediate neighbors */
+            key_cg + 1, key_cg - 1,        /* Direct adjacent */
+            /* Bit masking patterns for hierarchical cgroups */
+            key_cg & 0xFFFFFF00,           /* Mask lower 8 bits */
+            key_cg & 0xFFFFF000,           /* Mask lower 12 bits */
+            key_cg & 0xFFFF0000,           /* Mask lower 16 bits */
             1                              /* Root cgroup fallback */
         };
 
         #pragma unroll
-        for (int i = 0; i < 13; i++) {
+        for (int i = 0; i < 24; i++) {
             u64 *parent_quota = bpf_map_lookup_elem(&quota_cg, &parent_candidates[i]);
             if (parent_quota && *parent_quota > 0) {
                 fallback_quota = *parent_quota;
@@ -1190,25 +1223,46 @@ int on_switch(struct trace_event_raw_sched_switch *ctx) {
     /* 4. Áp dụng nhiệt độ */
     adjusted_quota = adjust_for_temperature(adjusted_quota);
     
-    /* Thực hiện throttling nếu cần */
+    /* Thực hiện throttling nếu cần - GENTLE: cho phép vượt quota 20% trước khi throttle */
     u32 throttled = 0;
-    if (*spent_ns > adjusted_quota) {
-        /* Reset thời gian tích lũy */
-        *spent_ns = 0;
+    u64 throttle_threshold = adjusted_quota + (adjusted_quota / 5); /* +20% buffer */
+    if (*spent_ns > throttle_threshold) {
+        /* GENTLE RESET: Chỉ reset một phần thay vì toàn bộ */
+        *spent_ns = adjusted_quota; /* Reset về quota level thay vì 0 */
         throttled = 1;
         
         /* Lưu thời điểm throttle */
         u64 now = bpf_ktime_get_ns();
         bpf_map_update_elem(&last_stop_cg, &key_cg, &now, BPF_ANY);
         
-        /* Gửi tín hiệu SIGSTOP và SIGCONT ngay lập tức */
-        bpf_send_signal_thread(SIGSTOP);
-        bpf_send_signal_thread(SIGCONT);
+        /* CPU LIMITING: Không sử dụng SIGSTOP, chỉ limit CPU qua cgroup và uclamp */
+        /* Process sẽ tiếp tục chạy nhưng bị giới hạn CPU */
         
-        /* Áp dụng util_clamp nếu được bật */
+        /* ENHANCED CPU LIMITING: Sử dụng util_clamp để limit CPU thay vì SIGSTOP */
         if (g_enable_uclamp) {
-            /* Giới hạn utilization xuống 80% */
-            set_uclamp(prev_pid, 800); /* 80% */
+            /* Tính toán utilization target dựa trên mức vượt quota */
+            u64 overage = *spent_ns - adjusted_quota;
+            u64 overage_percent = (overage * 100) / adjusted_quota;
+
+            /* Điều chỉnh util_clamp dựa trên mức vượt quota */
+            u32 target_util;
+            if (overage_percent > 50) {
+                target_util = 600; /* 60% - throttle mạnh */
+            } else if (overage_percent > 20) {
+                target_util = 750; /* 75% - throttle vừa */
+            } else {
+                target_util = 850; /* 85% - throttle nhẹ */
+            }
+
+            set_uclamp(prev_pid, target_util);
+
+            if (opt.verbose) {
+                bpf_printk("CPU_LIMIT: PID=%u, overage=%llu%%, target_util=%u%%\n",
+                          prev_pid, overage_percent, target_util / 10);
+            }
+        } else {
+            /* Fallback: Sử dụng cgroup CPU limit */
+            /* Điều này sẽ được handle bởi userspace cgroup scanner */
         }
     }
     
