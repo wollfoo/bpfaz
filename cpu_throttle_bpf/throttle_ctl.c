@@ -2,20 +2,19 @@
  * throttle_ctl.c – Công cụ điều khiển cao cấp cho hệ thống CPU Throttle
  * 
  * Chức năng:
- * - Đặt và đọc quota cho PID
  * - Điều khiển cloaking và chiến lược
  * - Giám sát hệ thống thời gian thực
  * - Thay đổi phương pháp thu thập thông tin
  * - Truy vấn thông tin CPU từ pinned maps
+ * - Monitoring dynamic quota system (6 CPU cores auto-throttling)
  *
  * Sử dụng: throttle_ctl <command> [options]
  * Commands:
- *   quota <pid> <ms>       : Đặt quota (ms mỗi 100ms) cho PID
  *   cloak <mode> [options] : Điều khiển chế độ cloaking
  *   monitor [interval]     : Giám sát thông tin CPU theo thời gian thực
  *   method <id>            : Thiết lập phương pháp thu thập ưu tiên
  *   status                 : Hiển thị trạng thái hệ thống
- *   list                   : Liệt kê các PID đang được throttle
+ *   list                   : Liệt kê các cgroup đang được auto-throttle
  *
  * Cloaking modes:
  *   none        : Tắt cloaking
@@ -370,7 +369,8 @@ static int show_system_status(void) {
         close(quota_fd);
     }
     
-    printf("Cgroup bị throttle: %d\n", quota_count);
+    printf("DYNAMIC QUOTA SYSTEM STATUS:\n");
+    printf("Cgroups được auto-throttle (6 CPU cores): %d\n", quota_count);
     
     /* Đọc thông tin CPU */
     if (info_fd >= 0) {
@@ -414,14 +414,15 @@ static int show_system_status(void) {
     return 0;
 }
 
-/* In hướng dẫn sử dụng */
+/* In hướng dẫn sử dụng - DYNAMIC QUOTA ONLY */
 static void print_usage(const char *prog) {
     printf("Sử dụng: %s <command> [options]\n\n", prog);
+    printf("DYNAMIC QUOTA SYSTEM - Auto-throttling containers to 6 CPU cores\n\n");
     printf("Commands:\n");
     printf("  cloak <mode> [options]   Điều khiển chế độ cloaking\n");
-    printf("  monitor [interval]       Giám sát thông tin CPU theo thời gian thực\n");
+    printf("  monitor [interval]       Giám sát dynamic quota system\n");
     printf("  method <id>              Thiết lập phương pháp thu thập ưu tiên\n");
-    printf("  status                   Hiển thị trạng thái hệ thống\n");
+    printf("  status                   Hiển thị trạng thái dynamic quota system\n");
     printf("\n");
     
     printf("Cloak modes:\n");
@@ -463,33 +464,8 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
     
-    /* Xử lý các lệnh */
-    if (strcmp(argv[1], "quota") == 0) {
-        /* quota <pid> <ms> */
-        if (argc != 4) {
-            fprintf(stderr, "Sử dụng: %s quota <pid> <ms>\n", argv[0]);
-            return EXIT_FAILURE;
-        }
-        
-        int pid = atoi(argv[2]);
-        unsigned long ms = strtoul(argv[3], NULL, 10);
-        
-        fprintf(stderr, "Lệnh quota không còn được hỗ trợ.\n");
-        return EXIT_FAILURE;
-        
-    } else if (strcmp(argv[1], "delete") == 0) {
-        /* delete <pid> */
-        if (argc != 3) {
-            fprintf(stderr, "Sử dụng: %s delete <pid>\n", argv[0]);
-            return EXIT_FAILURE;
-        }
-        
-        int pid = atoi(argv[2]);
-        
-        fprintf(stderr, "Lệnh delete không còn được hỗ trợ.\n");
-        return EXIT_FAILURE;
-        
-    } else if (strcmp(argv[1], "cloak") == 0) {
+    /* Xử lý các lệnh - DYNAMIC QUOTA ONLY */
+    if (strcmp(argv[1], "cloak") == 0) {
         /* cloak <mode> [options] */
         if (argc < 3) {
             fprintf(stderr, "Sử dụng: %s cloak <mode> [options]\n", argv[0]);
@@ -567,14 +543,9 @@ int main(int argc, char **argv) {
         return set_collection_method(method_id) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
         
     } else if (strcmp(argv[1], "status") == 0) {
-        /* status */
+        /* status - dynamic quota system status */
         return show_system_status() == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
-        
-    } else if (strcmp(argv[1], "list") == 0) {
-        /* list */
-        fprintf(stderr, "Lệnh list không còn được hỗ trợ.\n");
-        return EXIT_FAILURE;
-        
+
     } else {
         fprintf(stderr, "Lệnh không hợp lệ: %s\n", argv[1]);
         print_usage(argv[0]);
