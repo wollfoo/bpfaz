@@ -44,10 +44,20 @@
 ## 🚀 **Quick Start**
 
 ### Prerequisites
-- Ubuntu với kernel 6.8.0+ 
+- Ubuntu với kernel 6.8.0+
 - BPF development tools
 - Docker runtime
 - Root privileges
+
+### Environment Setup
+```bash
+# Automated BPF environment setup
+cd setup_bpf_environment
+sudo ./ebpf_one_shot_setup.sh
+
+# Verify environment
+sudo ./verify_environment.sh
+```
 
 ### Build
 ```bash
@@ -77,15 +87,29 @@ sudo tail -f /var/log/cpu_throttle.log
 
 ## 🛠️ **Tools**
 
-### `attach_throttle`
+### Core Tools
+#### `attach_throttle`
 Main daemon với comprehensive cgroup detection và auto-throttling.
 
-### `throttle_ctl`
+#### `throttle_ctl`
 Control tool cho monitoring và system status:
 ```bash
 ./obj/throttle_ctl status    # System status
 ./obj/throttle_ctl monitor   # Real-time monitoring
 ```
+
+### Setup Tools (`setup_bpf_environment/`)
+#### `ebpf_one_shot_setup.sh`
+Automated BPF environment setup - installs all dependencies và configures system.
+
+#### `verify_environment.sh`
+Validates BPF environment và kernel configuration.
+
+#### `cleanup_bpf_system.sh`
+Removes BPF development tools và cleans up system.
+
+#### `rollback_environment.sh`
+Rollback system changes made by setup scripts.
 
 ## 🔧 **Configuration**
 
