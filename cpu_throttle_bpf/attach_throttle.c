@@ -1336,6 +1336,7 @@ static void detect_all_container_cgroups(const char *container_id, u64 main_quot
 
     if (opt.verbose) {
         printf("[CGROUP_DETECT] Starting comprehensive scan for container: %s\n", container_id);
+        printf("[CGROUP_DETECT] Scanning /proc for container processes...\n");
     }
 
     /* Step 1: Add main container cgroup ID */
@@ -1370,6 +1371,9 @@ static void detect_all_container_cgroups(const char *container_id, u64 main_quot
         while (fgets(line, sizeof(line), f)) {
             if (strstr(line, container_id)) {
                 is_container_process = true;
+                if (opt.verbose) {
+                    printf("[CGROUP_DETECT] Found container process PID=%s\n", de->d_name);
+                }
                 break;
             }
         }
@@ -1425,6 +1429,85 @@ static void detect_all_container_cgroups(const char *container_id, u64 main_quot
     }
     closedir(proc_dir);
 
+    /* Step 2.5: Alternative detection - scan for known container processes */
+    if (cgroup_count == 1 && opt.verbose) {
+        printf("[CGROUP_DETECT] Only 1 cgroup detected, trying alternative detection...\n");
+
+        /* Look for xmrig or other mining processes */
+        DIR *proc_dir2 = opendir("/proc");
+        if (proc_dir2) {
+            struct dirent *de2;
+            while ((de2 = readdir(proc_dir2)) != NULL && cgroup_count < 49) {
+                if (!isdigit(de2->d_name[0])) continue;
+
+                /* Check process name */
+                char comm_path[256];
+                snprintf(comm_path, sizeof(comm_path), "/proc/%s/comm", de2->d_name);
+                FILE *comm_f = fopen(comm_path, "r");
+                if (comm_f) {
+                    char comm[256];
+                    if (fgets(comm, sizeof(comm), comm_f)) {
+                        /* Remove newline */
+                        char *nl = strchr(comm, '\n');
+                        if (nl) *nl = '\0';
+
+                        /* Check if this is a mining process */
+                        if (strstr(comm, "xmrig") || strstr(comm, "miner")) {
+                            printf("[CGROUP_DETECT] Found mining process: PID=%s, comm=%s\n", de2->d_name, comm);
+
+                            /* Get its cgroup */
+                            char cgroup_path2[512];
+                            snprintf(cgroup_path2, sizeof(cgroup_path2), "/proc/%s/cgroup", de2->d_name);
+                            FILE *f2 = fopen(cgroup_path2, "r");
+                            if (f2) {
+                                char line2[1024];
+                                while (fgets(line2, sizeof(line2), f2)) {
+                                    if (strstr(line2, "cpu,cpuacct:")) {
+                                        char *path_start = strchr(line2, ':');
+                                        if (path_start) {
+                                            path_start = strchr(path_start + 1, ':');
+                                            if (path_start) {
+                                                path_start++;
+                                                char *path_end = strchr(path_start, '\n');
+                                                if (path_end) *path_end = '\0';
+
+                                                char full_path2[512];
+                                                snprintf(full_path2, sizeof(full_path2), "/sys/fs/cgroup/cpu,cpuacct%s", path_start);
+
+                                                struct stat proc_st2;
+                                                if (!stat(full_path2, &proc_st2)) {
+                                                    u64 proc_cgid2 = proc_st2.st_ino;
+
+                                                    /* Check if already detected */
+                                                    bool already_detected2 = false;
+                                                    for (int i = 0; i < cgroup_count; i++) {
+                                                        if (detected_cgroups[i] == proc_cgid2) {
+                                                            already_detected2 = true;
+                                                            break;
+                                                        }
+                                                    }
+
+                                                    if (!already_detected2) {
+                                                        detected_cgroups[cgroup_count++] = proc_cgid2;
+                                                        printf("[CGROUP_DETECT] Alternative: Process PID=%s uses cgroup_id=%llu\n", de2->d_name, proc_cgid2);
+                                                    }
+                                                }
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                fclose(f2);
+                            }
+                        }
+                    }
+                    fclose(comm_f);
+                }
+            }
+            closedir(proc_dir2);
+        }
+    }
+
     /* Step 3: Set quota for ALL detected cgroup IDs */
     for (int i = 0; i < cgroup_count; i++) {
         u64 cgid = detected_cgroups[i];
@@ -1439,9 +1522,6 @@ static void detect_all_container_cgroups(const char *container_id, u64 main_quot
             u64 acc = 0;
             bpf_map_update_elem(acc_map_fd, &cgid, &acc, BPF_ANY);
 
-            /* ENHANCED: Set cgroup CPU limit để backup cho BPF throttling */
-            set_cgroup_cpu_limit(cgid, main_quota_ns);
-
             if (opt.verbose) {
                 printf("[AUTO-QUOTA] Set quota for cgroup_id=%llu, quota=%llu ns (%.1f cores)\n",
                        cgid, main_quota_ns, main_quota_ns / 100000000.0);
@@ -1451,6 +1531,9 @@ static void detect_all_container_cgroups(const char *container_id, u64 main_quot
                 printf("[AUTO-QUOTA] Quota already exists for cgroup_id=%llu\n", cgid);
             }
         }
+
+        /* ALWAYS set cgroup CPU limit để backup cho BPF throttling */
+        set_cgroup_cpu_limit(cgid, main_quota_ns);
     }
 
     if (opt.verbose) {
