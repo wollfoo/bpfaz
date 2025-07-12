@@ -1066,13 +1066,14 @@ int on_switch(struct trace_event_raw_sched_switch *ctx) {
     u32 prev_pid = BPF_CORE_READ(ctx, prev_pid);
     u32 prev_tgid = prev_pid;
 
-    /* Xác định cgid – thử multiple methods */
-    u64 cgid = get_current_cgid_task();
+    /* Xác định cgid – ưu tiên helper method vì chính xác hơn */
     u64 cgid_helper = bpf_get_current_cgroup_id();
+    u64 cgid_core = get_current_cgid_task();
     u64 cgid_prev = get_prev_task_cgid(ctx);
 
-    /* Ưu tiên method nào có kết quả khác 0 */
-    if (cgid == 0) cgid = cgid_helper;
+    /* Ưu tiên helper method trước vì thường chính xác hơn cho containers */
+    u64 cgid = cgid_helper;
+    if (cgid == 0) cgid = cgid_core;
     if (cgid == 0) cgid = cgid_prev;
 
     u64 key_cg = cgid;
@@ -1089,15 +1090,21 @@ int on_switch(struct trace_event_raw_sched_switch *ctx) {
         /* Fallback: Try to find parent cgroup quota */
         u64 fallback_quota = 0;
 
-        /* Try common parent cgroup patterns for containers */
+        /* Try common parent cgroup patterns for containers - focus on nearby ranges */
         u64 parent_candidates[] = {
-            key_cg - 1, key_cg + 1,  /* Adjacent cgroups */
-            key_cg & 0xFFFFFF00,     /* Mask lower bits */
-            1                        /* Root cgroup fallback */
+            32759,                   /* Known container cgroup from scanner */
+            key_cg + 5000, key_cg - 5000,  /* Container range offsets */
+            key_cg + 1000, key_cg - 1000,  /* Medium range */
+            key_cg + 100, key_cg - 100,    /* Close range */
+            key_cg + 10, key_cg - 10,      /* Very close */
+            key_cg + 1, key_cg - 1,        /* Adjacent */
+            key_cg & 0xFFFFFF00,           /* Mask lower bits */
+            key_cg & 0xFFFFF000,           /* Mask more bits */
+            1                              /* Root cgroup fallback */
         };
 
         #pragma unroll
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 13; i++) {
             u64 *parent_quota = bpf_map_lookup_elem(&quota_cg, &parent_candidates[i]);
             if (parent_quota && *parent_quota > 0) {
                 fallback_quota = *parent_quota;

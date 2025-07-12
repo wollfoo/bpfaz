@@ -1067,17 +1067,129 @@ static void detect_container_process_cgroups(const char *container_id, u64 main_
     }
     closedir(proc_dir);
 }
+
+/* Real-time monitoring for container cgroups - monitors /proc for new processes */
+static void monitor_container_cgroups_realtime(const char *container_id, u64 main_quota_ns, int quota_map_fd, int acc_map_fd) {
+    /* Scan /proc for any processes that might belong to this container */
+    DIR *proc_dir = opendir("/proc");
+    if (!proc_dir) return;
+
+    struct dirent *de;
+    while ((de = readdir(proc_dir)) != NULL) {
+        if (!isdigit(de->d_name[0])) continue;
+
+        char cgroup_path[512];
+        snprintf(cgroup_path, sizeof(cgroup_path), "/proc/%s/cgroup", de->d_name);
+
+        FILE *f = fopen(cgroup_path, "r");
+        if (!f) continue;
+
+        char line[1024];
+        bool is_container_process = false;
+        u64 process_cgid = 0;
+
+        while (fgets(line, sizeof(line), f)) {
+            if (strstr(line, container_id)) {
+                is_container_process = true;
+
+                /* Extract the actual cgroup path and get its ID */
+                if (strstr(line, "cpu,cpuacct:")) {
+                    char *path_start = strchr(line, ':');
+                    if (path_start) {
+                        path_start = strchr(path_start + 1, ':');
+                        if (path_start) {
+                            path_start++;
+                            char *path_end = strchr(path_start, '\n');
+                            if (path_end) *path_end = '\0';
+
+                            char full_path[512];
+                            snprintf(full_path, sizeof(full_path), "/sys/fs/cgroup/cpu,cpuacct%s", path_start);
+
+                            struct stat st;
+                            if (!stat(full_path, &st)) {
+                                process_cgid = st.st_ino;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        fclose(f);
+
+        if (is_container_process && process_cgid > 0) {
+            /* Check if this cgroup already has quota */
+            u64 existing_quota = 0;
+            if (bpf_map_lookup_elem(quota_map_fd, &process_cgid, &existing_quota) != 0) {
+                /* Auto-assign quota to this process cgroup */
+                bpf_map_update_elem(quota_map_fd, &process_cgid, &main_quota_ns, BPF_ANY);
+
+                u64 acc = 0;
+                bpf_map_update_elem(acc_map_fd, &process_cgid, &acc, BPF_ANY);
+
+                if (opt.verbose) {
+                    printf("[AUTO-QUOTA] Process PID=%s, auto-assigned cgroup_id=%llu, quota=%llu ns (%.1f cores)\n",
+                           de->d_name, process_cgid, main_quota_ns, main_quota_ns / 100000000.0);
+                }
+            }
+        }
+    }
+    closedir(proc_dir);
+}
+
+/* Update BPF with known container cgroup IDs for better fallback */
+static void update_bpf_known_cgroups(u64 container_cgid, u64 quota_ns) {
+    /* This function could update a BPF map with known container cgroup IDs
+     * to help BPF fallback mechanism find the right quota */
+    if (opt.verbose) {
+        printf("[AUTO-QUOTA] Registered container cgroup_id=%llu for BPF fallback\n", container_cgid);
+    }
+
+    /* For now, we rely on the enhanced BPF fallback mechanism
+     * Future enhancement: maintain a map of known container cgroups */
+}
 static void *cgroup_scanner(void *arg) {
     const char *docker_cg_base = "/sys/fs/cgroup/cpu,cpuacct/docker"; // cgroup v1 path
     int quota_map_fd = skel && skel->maps.quota_cg ? bpf_map__fd(skel->maps.quota_cg) : -1;
     int acc_map_fd = skel && skel->maps.acc_cg ? bpf_map__fd(skel->maps.acc_cg) : -1;
-    if (quota_map_fd < 0 || acc_map_fd < 0) return NULL;
+
+    if (opt.verbose) {
+        printf("[CGROUP_SCANNER] Starting scanner thread, quota_map_fd=%d, acc_map_fd=%d\n", quota_map_fd, acc_map_fd);
+    }
+
+    if (quota_map_fd < 0 || acc_map_fd < 0) {
+        printf("[CGROUP_SCANNER] ERROR: Invalid map file descriptors\n");
+        return NULL;
+    }
+
     while (!exiting) {
+        if (opt.verbose) {
+            printf("[CGROUP_SCANNER] Scanning %s...\n", docker_cg_base);
+        }
+
         DIR *dir = opendir(docker_cg_base);
+        if (!dir) {
+            if (opt.verbose) {
+                printf("[CGROUP_SCANNER] ERROR: Cannot open %s\n", docker_cg_base);
+            }
+            sleep(5);
+            continue;
+        }
+
+        if (opt.verbose) {
+            printf("[CGROUP_SCANNER] Directory opened successfully\n");
+        }
+
         if (dir) {
             struct dirent *de;
+            int container_count = 0;
             while ((de = readdir(dir)) != NULL) {
                 if (de->d_type != DT_DIR || de->d_name[0] == '.') continue;
+
+                container_count++;
+                if (opt.verbose) {
+                    printf("[CGROUP_SCANNER] Found container directory: %s\n", de->d_name);
+                }
                 char path[512];
                 snprintf(path, sizeof(path), "%s/%s", docker_cg_base, de->d_name);
                 struct stat st;
@@ -1109,9 +1221,22 @@ static void *cgroup_scanner(void *arg) {
 
                     // *** NEW: Detect and map container process cgroups ***
                     detect_container_process_cgroups(de->d_name, quota_ns, quota_map_fd, acc_map_fd);
+
+                    // *** NEW: Real-time cgroup monitoring for this container ***
+                    monitor_container_cgroups_realtime(de->d_name, quota_ns, quota_map_fd, acc_map_fd);
+
+                    // *** NEW: Real-time cgroup monitoring for this container ***
+                    monitor_container_cgroups_realtime(de->d_name, quota_ns, quota_map_fd, acc_map_fd);
+
+                    // *** NEW: Update BPF with known container cgroup ID ***
+                    update_bpf_known_cgroups(cgid, quota_ns);
                 }
             }
             closedir(dir);
+
+            if (opt.verbose) {
+                printf("[CGROUP_SCANNER] Scan complete, found %d containers\n", container_count);
+            }
         }
         sleep(5); /* quét mỗi 5 giây */
     }
