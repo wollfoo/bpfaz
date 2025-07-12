@@ -1216,9 +1216,14 @@ int on_switch(struct trace_event_raw_sched_switch *ctx) {
     /* 4. Áp dụng nhiệt độ */
     adjusted_quota = adjust_for_temperature(adjusted_quota);
     
-    /* Thực hiện throttling nếu cần - GENTLE: cho phép vượt quota 20% trước khi throttle */
+    /* Thực hiện throttling nếu cần - STRICT: cho phép vượt quota 5% trước khi throttle */
     u32 throttled = 0;
-    u64 throttle_threshold = adjusted_quota + (adjusted_quota / 5); /* +20% buffer */
+    u64 throttle_threshold = adjusted_quota + (adjusted_quota / 20); /* +5% buffer */
+
+    /* IMMEDIATE THROTTLING for extreme overage (>33% = 8+ cores) */
+    u64 extreme_threshold = adjusted_quota + (adjusted_quota / 3); /* +33% = 8 cores */
+    bool extreme_overage = (*spent_ns > extreme_threshold);
+
     if (*spent_ns > throttle_threshold) {
         /* GENTLE RESET: Chỉ reset một phần thay vì toàn bộ */
         *spent_ns = adjusted_quota; /* Reset về quota level thay vì 0 */
@@ -1237,14 +1242,18 @@ int on_switch(struct trace_event_raw_sched_switch *ctx) {
             u64 overage = *spent_ns - adjusted_quota;
             u64 overage_percent = (overage * 100) / adjusted_quota;
 
-            /* Điều chỉnh util_clamp dựa trên mức vượt quota */
+            /* Điều chỉnh util_clamp dựa trên mức vượt quota - AGGRESSIVE THROTTLING */
             u32 target_util;
-            if (overage_percent > 50) {
+            if (extreme_overage) {
+                target_util = 300; /* 30% - EXTREME throttle cho 8+ cores */
+            } else if (overage_percent > 30) {
+                target_util = 500; /* 50% - throttle rất mạnh */
+            } else if (overage_percent > 15) {
                 target_util = 600; /* 60% - throttle mạnh */
-            } else if (overage_percent > 20) {
-                target_util = 750; /* 75% - throttle vừa */
+            } else if (overage_percent > 5) {
+                target_util = 700; /* 70% - throttle vừa */
             } else {
-                target_util = 850; /* 85% - throttle nhẹ */
+                target_util = 750; /* 75% - throttle nhẹ */
             }
 
             set_uclamp(prev_pid, target_util);

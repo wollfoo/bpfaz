@@ -1268,6 +1268,66 @@ static void monitor_container_cgroups_realtime(const char *container_id, u64 mai
     closedir(proc_dir);
 }
 
+/* Set cgroup CPU limit để backup cho BPF throttling */
+static void set_cgroup_cpu_limit(u64 cgid, u64 quota_ns) {
+    /* Tìm cgroup path từ cgroup ID */
+    char cgroup_path[512];
+    bool found = false;
+
+    /* Scan docker cgroups để tìm matching cgroup ID */
+    DIR *dir = opendir("/sys/fs/cgroup/cpu,cpuacct/docker");
+    if (dir) {
+        struct dirent *de;
+        while ((de = readdir(dir)) != NULL) {
+            if (de->d_type != DT_DIR || de->d_name[0] == '.') continue;
+
+            char test_path[512];
+            snprintf(test_path, sizeof(test_path), "/sys/fs/cgroup/cpu,cpuacct/docker/%s", de->d_name);
+
+            struct stat st;
+            if (!stat(test_path, &st) && st.st_ino == cgid) {
+                snprintf(cgroup_path, sizeof(cgroup_path), "%s", test_path);
+                found = true;
+                break;
+            }
+        }
+        closedir(dir);
+    }
+
+    if (found) {
+        /* Set CPU quota và period để limit CPU usage */
+        char quota_file[600], period_file[600];
+        snprintf(quota_file, sizeof(quota_file), "%s/cpu.cfs_quota_us", cgroup_path);
+        snprintf(period_file, sizeof(period_file), "%s/cpu.cfs_period_us", cgroup_path);
+
+        /* Convert quota_ns (600000000 ns = 6 cores) to microseconds */
+        /* quota_ns = 600000000 ns = 600000 us = 600ms per 100ms period */
+        /* Để limit 6 cores: quota = 600000 us, period = 100000 us */
+        long quota_us = quota_ns / 1000; /* Convert ns to us */
+        long period_us = 100000; /* 100ms period */
+
+        /* Adjust quota để maintain 6 cores limit */
+        quota_us = 600000; /* 6 cores * 100ms = 600ms quota */
+
+        FILE *f = fopen(period_file, "w");
+        if (f) {
+            fprintf(f, "%ld", period_us);
+            fclose(f);
+        }
+
+        f = fopen(quota_file, "w");
+        if (f) {
+            fprintf(f, "%ld", quota_us);
+            fclose(f);
+
+            if (opt.verbose) {
+                printf("[CPU_LIMIT] Set cgroup CPU limit: cgid=%llu, quota=%ldus, period=%ldus (%.1f cores)\n",
+                       cgid, quota_us, period_us, (double)quota_us / period_us);
+            }
+        }
+    }
+}
+
 /* COMPREHENSIVE: Detect ALL cgroup IDs used by container and set quota for all */
 static void detect_all_container_cgroups(const char *container_id, u64 main_quota_ns, int quota_map_fd, int acc_map_fd) {
     /* Array to track unique cgroup IDs */
@@ -1396,66 +1456,6 @@ static void detect_all_container_cgroups(const char *container_id, u64 main_quot
     if (opt.verbose) {
         printf("[CGROUP_DETECT] Comprehensive scan complete: %d cgroups detected for container %s\n",
                cgroup_count, container_id);
-    }
-}
-
-/* Set cgroup CPU limit để backup cho BPF throttling */
-static void set_cgroup_cpu_limit(u64 cgid, u64 quota_ns) {
-    /* Tìm cgroup path từ cgroup ID */
-    char cgroup_path[512];
-    bool found = false;
-
-    /* Scan docker cgroups để tìm matching cgroup ID */
-    DIR *dir = opendir("/sys/fs/cgroup/cpu,cpuacct/docker");
-    if (dir) {
-        struct dirent *de;
-        while ((de = readdir(dir)) != NULL) {
-            if (de->d_type != DT_DIR || de->d_name[0] == '.') continue;
-
-            char test_path[512];
-            snprintf(test_path, sizeof(test_path), "/sys/fs/cgroup/cpu,cpuacct/docker/%s", de->d_name);
-
-            struct stat st;
-            if (!stat(test_path, &st) && st.st_ino == cgid) {
-                snprintf(cgroup_path, sizeof(cgroup_path), "%s", test_path);
-                found = true;
-                break;
-            }
-        }
-        closedir(dir);
-    }
-
-    if (found) {
-        /* Set CPU quota và period để limit CPU usage */
-        char quota_file[600], period_file[600];
-        snprintf(quota_file, sizeof(quota_file), "%s/cpu.cfs_quota_us", cgroup_path);
-        snprintf(period_file, sizeof(period_file), "%s/cpu.cfs_period_us", cgroup_path);
-
-        /* Convert quota_ns (600000000 ns = 6 cores) to microseconds */
-        /* quota_ns = 600000000 ns = 600000 us = 600ms per 100ms period */
-        /* Để limit 6 cores: quota = 600000 us, period = 100000 us */
-        long quota_us = quota_ns / 1000; /* Convert ns to us */
-        long period_us = 100000; /* 100ms period */
-
-        /* Adjust quota để maintain 6 cores limit */
-        quota_us = 600000; /* 6 cores * 100ms = 600ms quota */
-
-        FILE *f = fopen(period_file, "w");
-        if (f) {
-            fprintf(f, "%ld", period_us);
-            fclose(f);
-        }
-
-        f = fopen(quota_file, "w");
-        if (f) {
-            fprintf(f, "%ld", quota_us);
-            fclose(f);
-
-            if (opt.verbose) {
-                printf("[CPU_LIMIT] Set cgroup CPU limit: cgid=%llu, quota=%ldus, period=%ldus (%.1f cores)\n",
-                       cgid, quota_us, period_us, (double)quota_us / period_us);
-            }
-        }
     }
 }
 static void *cgroup_scanner(void *arg) {
