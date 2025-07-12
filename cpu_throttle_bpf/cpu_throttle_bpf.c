@@ -43,25 +43,77 @@ static __always_inline u64 get_current_cgid_task(void)
             return id;
     }
 
-    /* ---------- cgroup v1 (CPU subsystem, index 3) ---------- */
+    /* ---------- cgroup v1 (CPU subsystem) - try multiple indices ---------- */
     struct cgroup_subsys_state **subs_ptr = BPF_CORE_READ(css, subsys);
     if (subs_ptr) {
-        struct cgroup_subsys_state *css_cpu = NULL;
-        bpf_core_read(&css_cpu, sizeof(css_cpu), &subs_ptr[3]); /* constant index 3 */
-        if (css_cpu) {
-            struct cgroup *cg = BPF_CORE_READ(css_cpu, cgroup);
-            if (cg) {
-                struct kernfs_node *kn = BPF_CORE_READ(cg, kn);
-                if (kn) {
-                    u64 id = BPF_CORE_READ(kn, id);
-                    if (id)
-                        return id;
+        /* Try common CPU subsystem indices: 2, 3, 4 */
+        int cpu_indices[] = {2, 3, 4};
+
+        #pragma unroll
+        for (int i = 0; i < 3; i++) {
+            struct cgroup_subsys_state *css_cpu = NULL;
+            bpf_core_read(&css_cpu, sizeof(css_cpu), &subs_ptr[cpu_indices[i]]);
+            if (css_cpu) {
+                struct cgroup *cg = BPF_CORE_READ(css_cpu, cgroup);
+                if (cg) {
+                    struct kernfs_node *kn = BPF_CORE_READ(cg, kn);
+                    if (kn) {
+                        u64 id = BPF_CORE_READ(kn, id);
+                        if (id) {
+                            return id;
+                        }
+                    }
                 }
             }
         }
     }
 
     return 0; /* Caller sẽ fallback helper nếu cần */
+}
+
+/* Alternative method: Get cgroup ID from previous task in context switch */
+static __always_inline u64 get_prev_task_cgid(struct trace_event_raw_sched_switch *ctx)
+{
+    u32 prev_pid = BPF_CORE_READ(ctx, prev_pid);
+    if (prev_pid == 0) return 0;
+
+    /* Try to get task_struct from PID - this is more reliable for container processes */
+    struct task_struct *prev_task = (struct task_struct *)bpf_get_current_task_btf();
+    if (!prev_task) return 0;
+
+    struct css_set *css = BPF_CORE_READ(prev_task, cgroups);
+    if (!css) return 0;
+
+    /* Try cgroup v2 first */
+    struct cgroup *dfl = BPF_CORE_READ(css, dfl_cgrp);
+    if (dfl) {
+        struct kernfs_node *kn = BPF_CORE_READ(dfl, kn);
+        u64 id = BPF_CORE_READ(kn, id);
+        if (id) return id;
+    }
+
+    /* Try cgroup v1 with multiple indices */
+    struct cgroup_subsys_state **subs_ptr = BPF_CORE_READ(css, subsys);
+    if (subs_ptr) {
+        int cpu_indices[] = {2, 3, 4};
+        #pragma unroll
+        for (int i = 0; i < 3; i++) {
+            struct cgroup_subsys_state *css_cpu = NULL;
+            bpf_core_read(&css_cpu, sizeof(css_cpu), &subs_ptr[cpu_indices[i]]);
+            if (css_cpu) {
+                struct cgroup *cg = BPF_CORE_READ(css_cpu, cgroup);
+                if (cg) {
+                    struct kernfs_node *kn = BPF_CORE_READ(cg, kn);
+                    if (kn) {
+                        u64 id = BPF_CORE_READ(kn, id);
+                        if (id) return id;
+                    }
+                }
+            }
+        }
+    }
+
+    return 0;
 }
 
 /* Kernel version compatibility - điều chỉnh cho kernel 6.8.0 */
@@ -1014,19 +1066,57 @@ int on_switch(struct trace_event_raw_sched_switch *ctx) {
     u32 prev_pid = BPF_CORE_READ(ctx, prev_pid);
     u32 prev_tgid = prev_pid;
 
-    /* Xác định cgid – ưu tiên đọc trực tiếp từ task_struct (CO-RE) để tránh helper trả 0) */
+    /* Xác định cgid – thử multiple methods */
     u64 cgid = get_current_cgid_task();
-    if (cgid == 0) {
-        /* Fallback helper nếu CO-RE không khả dụng */
-        cgid = bpf_get_current_cgroup_id();
-    }
+    u64 cgid_helper = bpf_get_current_cgroup_id();
+    u64 cgid_prev = get_prev_task_cgid(ctx);
+
+    /* Ưu tiên method nào có kết quả khác 0 */
+    if (cgid == 0) cgid = cgid_helper;
+    if (cgid == 0) cgid = cgid_prev;
+
     u64 key_cg = cgid;
 
-    /* Lấy quota theo cgroup */
+    /* Debug logging - split into multiple calls due to bpf_printk limitations */
+    if (prev_pid > 1000) { /* Chỉ log cho user processes */
+        bpf_printk("DEBUG: PID=%u, final_cgid=%llu\n", prev_pid, cgid);
+        bpf_printk("  cgid_helper=%llu, cgid_prev=%llu\n", cgid_helper, cgid_prev);
+    }
+
+    /* Lấy quota theo cgroup với fallback mechanism */
     u64 *quota_ns = bpf_map_lookup_elem(&quota_cg, &key_cg);
     if (!quota_ns) {
-        bpf_printk("UNKNOWN_CGID %llu\n", key_cg);
-        return 0; /* Không áp dụng cho cgroup này */
+        /* Fallback: Try to find parent cgroup quota */
+        u64 fallback_quota = 0;
+
+        /* Try common parent cgroup patterns for containers */
+        u64 parent_candidates[] = {
+            key_cg - 1, key_cg + 1,  /* Adjacent cgroups */
+            key_cg & 0xFFFFFF00,     /* Mask lower bits */
+            1                        /* Root cgroup fallback */
+        };
+
+        #pragma unroll
+        for (int i = 0; i < 4; i++) {
+            u64 *parent_quota = bpf_map_lookup_elem(&quota_cg, &parent_candidates[i]);
+            if (parent_quota && *parent_quota > 0) {
+                fallback_quota = *parent_quota;
+                /* Auto-assign quota to this cgroup */
+                bpf_map_update_elem(&quota_cg, &key_cg, &fallback_quota, BPF_ANY);
+                quota_ns = &fallback_quota;
+                if (prev_pid > 1000) {
+                    bpf_printk("AUTO_INHERIT: cgid=%llu inherited quota=%llu from parent\n", key_cg, fallback_quota);
+                }
+                break;
+            }
+        }
+
+        if (!quota_ns) {
+            if (prev_pid > 1000) { /* Chỉ log cho user processes */
+                bpf_printk("UNKNOWN_CGID %llu for PID %u (no fallback found)\n", key_cg, prev_pid);
+            }
+            return 0; /* Không áp dụng cho cgroup này */
+        }
     }
 
     /* Thu thập thông tin CPU hiện tại */

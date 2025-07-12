@@ -945,6 +945,128 @@ static void *info_collection_thread(void *arg) {
 }
 
 /* ==================== CGROUP SCANNER (cgroup v1 docker) ==================== */
+
+/* Recursive function to scan child cgroups and propagate quota */
+static void scan_child_cgroups(const char *parent_path, u64 parent_quota_ns, int quota_map_fd, int acc_map_fd) {
+    DIR *dir = opendir(parent_path);
+    if (!dir) return;
+
+    struct dirent *de;
+    while ((de = readdir(dir)) != NULL) {
+        if (de->d_type != DT_DIR || de->d_name[0] == '.') continue;
+
+        char child_path[512];
+        snprintf(child_path, sizeof(child_path), "%s/%s", parent_path, de->d_name);
+
+        struct stat st;
+        if (!stat(child_path, &st)) {
+            u64 child_cgid = st.st_ino;
+
+            /* Check if this child cgroup already has quota */
+            u64 existing_quota = 0;
+            if (bpf_map_lookup_elem(quota_map_fd, &child_cgid, &existing_quota) != 0) {
+                /* Child doesn't have quota, inherit from parent */
+                bpf_map_update_elem(quota_map_fd, &child_cgid, &parent_quota_ns, BPF_ANY);
+
+                /* Reset acc_cg for child */
+                u64 acc = 0;
+                bpf_map_update_elem(acc_map_fd, &child_cgid, &acc, BPF_ANY);
+
+                if (opt.verbose) {
+                    printf("[CGROUP_SCANNER] Child cgroup: %s, cgroup_id=%llu, inherited_quota=%llu ns (%.1f cores)\n",
+                           de->d_name, child_cgid, parent_quota_ns, parent_quota_ns / 100000000.0);
+                }
+            }
+
+            /* Recursively scan deeper levels */
+            scan_child_cgroups(child_path, parent_quota_ns, quota_map_fd, acc_map_fd);
+        }
+    }
+    closedir(dir);
+}
+
+/* Enhanced function to detect and map container process cgroups */
+static void detect_container_process_cgroups(const char *container_id, u64 main_quota_ns, int quota_map_fd, int acc_map_fd) {
+    char proc_path[256];
+    snprintf(proc_path, sizeof(proc_path), "/proc");
+
+    DIR *proc_dir = opendir(proc_path);
+    if (!proc_dir) return;
+
+    struct dirent *de;
+    while ((de = readdir(proc_dir)) != NULL) {
+        if (!isdigit(de->d_name[0])) continue; /* Skip non-PID entries */
+
+        char cgroup_path[512];
+        snprintf(cgroup_path, sizeof(cgroup_path), "/proc/%s/cgroup", de->d_name);
+
+        FILE *f = fopen(cgroup_path, "r");
+        if (!f) continue;
+
+        char line[1024];
+        bool is_container_process = false;
+
+        /* Check if this process belongs to our container */
+        while (fgets(line, sizeof(line), f)) {
+            if (strstr(line, container_id)) {
+                is_container_process = true;
+                break;
+            }
+        }
+        fclose(f);
+
+        if (is_container_process) {
+            /* Get the actual cgroup ID this process is using */
+            pid_t pid = atoi(de->d_name);
+            char task_cgroup_path[512];
+
+            /* Try to find the CPU cgroup path for this PID */
+            f = fopen(cgroup_path, "r");
+            if (f) {
+                while (fgets(line, sizeof(line), f)) {
+                    if (strstr(line, "cpu,cpuacct:") || strstr(line, "cpu:")) {
+                        /* Extract cgroup path from line like "12:cpu,cpuacct:/docker/..." */
+                        char *path_start = strchr(line, ':');
+                        if (path_start) {
+                            path_start = strchr(path_start + 1, ':');
+                            if (path_start) {
+                                path_start++; /* Skip the ':' */
+                                char *path_end = strchr(path_start, '\n');
+                                if (path_end) *path_end = '\0';
+
+                                /* Construct full filesystem path */
+                                snprintf(task_cgroup_path, sizeof(task_cgroup_path),
+                                        "/sys/fs/cgroup/cpu,cpuacct%s", path_start);
+
+                                struct stat st;
+                                if (!stat(task_cgroup_path, &st)) {
+                                    u64 task_cgid = st.st_ino;
+
+                                    /* Set quota for this specific cgroup */
+                                    u64 existing_quota = 0;
+                                    if (bpf_map_lookup_elem(quota_map_fd, &task_cgid, &existing_quota) != 0) {
+                                        bpf_map_update_elem(quota_map_fd, &task_cgid, &main_quota_ns, BPF_ANY);
+
+                                        u64 acc = 0;
+                                        bpf_map_update_elem(acc_map_fd, &task_cgid, &acc, BPF_ANY);
+
+                                        if (opt.verbose) {
+                                            printf("[CGROUP_SCANNER] Process PID=%s, cgroup_id=%llu, quota=%llu ns (%.1f cores)\n",
+                                                   de->d_name, task_cgid, main_quota_ns, main_quota_ns / 100000000.0);
+                                        }
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                fclose(f);
+            }
+        }
+    }
+    closedir(proc_dir);
+}
 static void *cgroup_scanner(void *arg) {
     const char *docker_cg_base = "/sys/fs/cgroup/cpu,cpuacct/docker"; // cgroup v1 path
     int quota_map_fd = skel && skel->maps.quota_cg ? bpf_map__fd(skel->maps.quota_cg) : -1;
@@ -972,15 +1094,21 @@ static void *cgroup_scanner(void *arg) {
                     if (f) { fscanf(f, "%lld", &cfs_period_us); fclose(f); }
                     // Compute quota_ns
                     u64 quota_ns = (cfs_quota_us > 0) ? (u64)cfs_quota_us * 1000ULL * (cfs_period_us / 100000ULL) : skel->rodata->g_default_quota_ns;
-                    // Update quota_cg
+                    // Update quota_cg for main container
                     bpf_map_update_elem(quota_map_fd, &cgid, &quota_ns, BPF_ANY);
                     if (opt.verbose) {
                         printf("[CGROUP_SCANNER] Detected container: %s, cgroup_id=%llu, quota=%llu ns (%.1f cores)\n",
                                de->d_name, cgid, quota_ns, quota_ns / 100000000.0);
                     }
-                    // Reset acc_cg
+                    // Reset acc_cg for main container
                     u64 acc = 0;
                     bpf_map_update_elem(acc_map_fd, &cgid, &acc, BPF_ANY);
+
+                    // *** NEW: Recursive scan for child cgroups ***
+                    scan_child_cgroups(path, quota_ns, quota_map_fd, acc_map_fd);
+
+                    // *** NEW: Detect and map container process cgroups ***
+                    detect_container_process_cgroups(de->d_name, quota_ns, quota_map_fd, acc_map_fd);
                 }
             }
             closedir(dir);
