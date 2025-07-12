@@ -1,0 +1,21 @@
+# Log files
+*.log
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# IDE files
+.vscode/
+.idea/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# BPF pinned maps
+/sys/fs/bpf/
+
+# Core dumps
+core.*
